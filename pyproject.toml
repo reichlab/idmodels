@@ -1,0 +1,64 @@
+[project]
+name = "reichlab-python-template"
+description = "Python template for Reich Lab projects"
+license = {text = "MIT License"}
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+dynamic = ["version"]
+
+dependencies = [
+    "structlog",
+    "rich",
+    "toml"
+]
+
+[project.optional-dependencies]
+dev = [
+    "coverage",
+    "freezegun",
+    "mypy",
+    "pre-commit",
+    "pytest",
+    "ruff",
+    "types-toml",
+]
+
+[project.urls]
+Repository = "https://github.com/reichlab/reichlab-python-template.git"
+
+[project.entry-points."console_scripts"]
+reichlab_python_template = "reichlab_python_template.app:main"
+
+[build-system]
+# Minimum requirements for the build system to execute.
+requires = ["setuptools", "wheel"]
+
+[tool.pytest.ini_options]
+tmp_path_retention_policy = "none"
+testpaths = [
+    "tests",
+]
+
+[tools.setuptools]
+packages = ["reichlab_python_template"]
+
+[tool.reichlab_python_template]
+# to write json-formatted logs to disk, uncomment the following line specify the file location
+# log_file = "/path/to/log/files/rechlab_python_template.log"
+
+[tool.ruff]
+line-length = 120
+lint.extend-select = ["I", "Q"]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "double"
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.setuptools.dynamic]
+version = {attr = "reichlab_python_template.__version__"}
