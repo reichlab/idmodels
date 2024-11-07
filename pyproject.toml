@@ -1,6 +1,6 @@
 [project]
-name = "reichlab-python-template"
-description = "Python template for Reich Lab projects"
+name = "idmodels"
+description = "A Python module for modeling infectious disease."
 license = {text = "MIT License"}
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,10 +28,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/reichlab/reichlab-python-template.git"
-
-[project.entry-points."console_scripts"]
-reichlab_python_template = "reichlab_python_template.app:main"
+Repository = "https://github.com/reichlab/idmodels.git"
 
 [build-system]
 # Minimum requirements for the build system to execute.
@@ -44,11 +41,7 @@ testpaths = [
 ]
 
 [tools.setuptools]
-packages = ["reichlab_python_template"]
-
-[tool.reichlab_python_template]
-# to write json-formatted logs to disk, uncomment the following line specify the file location
-# log_file = "/path/to/log/files/rechlab_python_template.log"
+packages = ["idmodels"]
 
 [tool.ruff]
 line-length = 120
@@ -61,4 +54,4 @@ inline-quotes = "double"
 quote-style = "double"
 
 [tool.setuptools.dynamic]
-version = {attr = "reichlab_python_template.__version__"}
+version = {attr = "idmodels.__version__"}
