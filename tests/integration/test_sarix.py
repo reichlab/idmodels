@@ -39,8 +39,7 @@ def test_sarix(tmp_path):
 
     run_config = SimpleNamespace(
         ref_date=datetime.date.fromisoformat("2024-01-06"),
-        # output_root=tmp_path / 'model-output',
-        output_root=Path("tests/integration/data/"),
+        output_root=tmp_path / 'model-output',
         artifact_store_root=tmp_path / "artifact-store",
         save_feat_importance=False,
         max_horizon=3,
