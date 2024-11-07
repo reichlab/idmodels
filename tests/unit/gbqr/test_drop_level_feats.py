@@ -1,4 +1,4 @@
-from idmodels.preprocess import drop_level_feats
+from idmodels.preprocess import _drop_level_feats
 
 
 def test_drop_level_feats():
@@ -51,7 +51,7 @@ def test_drop_level_feats():
                 "inc_trans_cs_taylor_d1_c1_w5t_sNone_lag1", "inc_trans_cs_taylor_d1_c1_w5t_sNone_lag2",
                 "horizon"]
     
-    actual = drop_level_feats(in_feats)
+    actual = _drop_level_feats(in_feats)
     
     assert len(actual) == len(expected)
     assert not set(actual) - set(expected)
