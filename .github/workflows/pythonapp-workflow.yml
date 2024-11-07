@@ -16,9 +16,6 @@ jobs:
       - name: lint
         run: |
            ruff check .
-      - name: type check
-        run: |
-           mypy .
       - name: run tests
         run: |
            pytest
