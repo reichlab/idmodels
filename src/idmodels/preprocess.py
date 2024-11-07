@@ -1,9 +1,8 @@
 import fnmatch
 
 import pandas as pd
-
-from timeseriesutils import featurize
 from iddata.utils import get_holidays
+from timeseriesutils import featurize
 
 
 def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_names = []):
@@ -33,7 +32,7 @@ def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_nam
     feat_names = curr_feat_names
     
     # one-hot encodings of data source, agg_level, and location
-    for c in ['source', 'agg_level', 'location']:
+    for c in ["source", "agg_level", "location"]:
         ohe = pd.get_dummies(df[c], prefix=c)
         df = pd.concat([df, ohe], axis=1)
         feat_names = feat_names + list(ohe.columns)
@@ -42,57 +41,57 @@ def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_nam
     df = df.merge(
             get_holidays() \
                 .query("holiday == 'Christmas Day'") \
-                .drop(columns=['holiday', 'date']) \
-                .rename(columns={'season_week': 'xmas_week'}),
-            how='left',
-            on='season') \
-        .assign(delta_xmas = lambda x: x['season_week'] - x['xmas_week'])
+                .drop(columns=["holiday", "date"]) \
+                .rename(columns={"season_week": "xmas_week"}),
+            how="left",
+            on="season") \
+        .assign(delta_xmas = lambda x: x["season_week"] - x["xmas_week"])
     
-    feat_names = feat_names + ['delta_xmas']
+    feat_names = feat_names + ["delta_xmas"]
     
     # features summarizing data within each combination of source and location
     df, new_feat_names = featurize.featurize_data(
-        df, group_columns=['source', 'location'],
+        df, group_columns=["source", "location"],
         features = [
             {
-                'fun': 'windowed_taylor_coefs',
-                'args': {
-                    'columns': 'inc_trans_cs',
-                    'taylor_degree': 2,
-                    'window_align': 'trailing',
-                    'window_size': [4, 6],
-                    'fill_edges': False
+                "fun": "windowed_taylor_coefs",
+                "args": {
+                    "columns": "inc_trans_cs",
+                    "taylor_degree": 2,
+                    "window_align": "trailing",
+                    "window_size": [4, 6],
+                    "fill_edges": False
                 }
             },
             {
-                'fun': 'windowed_taylor_coefs',
-                'args': {
-                    'columns': 'inc_trans_cs',
-                    'taylor_degree': 1,
-                    'window_align': 'trailing',
-                    'window_size': [3, 5],
-                    'fill_edges': False
+                "fun": "windowed_taylor_coefs",
+                "args": {
+                    "columns": "inc_trans_cs",
+                    "taylor_degree": 1,
+                    "window_align": "trailing",
+                    "window_size": [3, 5],
+                    "fill_edges": False
                 }
             },
             {
-                'fun': 'rollmean',
-                'args': {
-                    'columns': 'inc_trans_cs',
-                    'group_columns': ['location'],
-                    'window_size': [2, 4]
+                "fun": "rollmean",
+                "args": {
+                    "columns": "inc_trans_cs",
+                    "group_columns": ["location"],
+                    "window_size": [2, 4]
                 }
             }
         ])
     feat_names = feat_names + new_feat_names
     
     df, new_feat_names = featurize.featurize_data(
-        df, group_columns=['source', 'location'],
+        df, group_columns=["source", "location"],
         features = [
             {
-                'fun': 'lag',
-                'args': {
-                    'columns': ['inc_trans_cs'] + new_feat_names,
-                    'lags': [1, 2]
+                "fun": "lag",
+                "args": {
+                    "columns": ["inc_trans_cs"] + new_feat_names,
+                    "lags": [1, 2]
                 }
             }
         ])
@@ -100,13 +99,13 @@ def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_nam
     
     # add forecast targets
     df, new_feat_names = featurize.featurize_data(
-        df, group_columns=['source', 'location'],
+        df, group_columns=["source", "location"],
         features = [
             {
-                'fun': 'horizon_targets',
-                'args': {
-                    'columns': 'inc_trans_cs',
-                    'horizons': [(i + 1) for i in range(max_horizon)]
+                "fun": "horizon_targets",
+                "args": {
+                    "columns": "inc_trans_cs",
+                    "horizons": [(i + 1) for i in range(max_horizon)]
                 }
             }
         ])
@@ -114,7 +113,7 @@ def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_nam
     
     # we will model the differences between the prediction target and the most
     # recent observed value
-    df['delta_target'] = df['inc_trans_cs_target'] - df['inc_trans_cs']
+    df["delta_target"] = df["inc_trans_cs_target"] - df["inc_trans_cs"]
     
     # if requested, drop features that involve absolute level
     if not incl_level_feats:
@@ -123,10 +122,10 @@ def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_nam
     return df, feat_names
 
 
-def drop_level_feats(feat_names):
-    level_feats = ['inc_trans_cs', 'inc_trans_cs_lag1', 'inc_trans_cs_lag2'] + \
-                  fnmatch.filter(feat_names, '*taylor_d?_c0*') + \
-                  fnmatch.filter(feat_names, '*inc_trans_cs_rollmean*')
+def _drop_level_feats(feat_names):
+    level_feats = ["inc_trans_cs", "inc_trans_cs_lag1", "inc_trans_cs_lag2"] + \
+                  fnmatch.filter(feat_names, "*taylor_d?_c0*") + \
+                  fnmatch.filter(feat_names, "*inc_trans_cs_rollmean*")
     feat_names = [f for f in feat_names if f not in level_feats]
     return feat_names
 
