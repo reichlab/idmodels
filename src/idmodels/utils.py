@@ -4,7 +4,7 @@
 
 import datetime
 
-def _validate_ref_date(ref_date):
+def validate_ref_date(ref_date):
     if ref_date is None:
         today = datetime.date.today()
         

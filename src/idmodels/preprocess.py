@@ -3,7 +3,7 @@ import fnmatch
 import pandas as pd
 
 from timeseriesutils import featurize
-from data_pipeline.utils import get_holidays
+from iddata.utils import get_holidays
 
 
 def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_names = []):
@@ -123,7 +123,7 @@ def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_nam
     return df, feat_names
 
 
-def _drop_level_feats(feat_names):
+def drop_level_feats(feat_names):
     level_feats = ['inc_trans_cs', 'inc_trans_cs_lag1', 'inc_trans_cs_lag2'] + \
                   fnmatch.filter(feat_names, '*taylor_d?_c0*') + \
                   fnmatch.filter(feat_names, '*inc_trans_cs_rollmean*')

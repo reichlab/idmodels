@@ -11,20 +11,22 @@ classifiers = [
 dynamic = ["version"]
 
 dependencies = [
-    "structlog",
-    "rich",
-    "toml"
+    "iddata @ git+https://github.com/reichlab/iddata",
+    "lightgbm",
+    "numpy",
+    "pandas",
+    "sarix @ git+https://github.com/elray1/sarix",
+    "scikit-learn",
+    "tqdm",
+    "timeseriesutils @ git+https://github.com/reichlab/timeseriesutils"
 ]
 
 [project.optional-dependencies]
 dev = [
     "coverage",
-    "freezegun",
-    "mypy",
     "pre-commit",
     "pytest",
-    "ruff",
-    "types-toml",
+    "ruff"
 ]
 
 [project.urls]
