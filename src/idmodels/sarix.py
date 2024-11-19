@@ -79,7 +79,7 @@ class SARIXModel():
         
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")
         preds_df["reference_date"] = run_config.ref_date
-        preds_df["horizon"] = preds_df["horizon"] - 2
+        preds_df["horizon"] = (pd.to_timedelta(preds_df["target_end_date"].dt.date - run_config.ref_date).dt.days / 7).astype(int)
         preds_df["output_type"] = "quantile"
         preds_df["target"] = "wk inc flu hosp"
         preds_df.drop(columns="wk_end_date", inplace=True)
