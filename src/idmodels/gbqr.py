@@ -32,7 +32,7 @@ class GBQRModel():
             flusurvnet_kwargs = {"burden_adj": False}
         
         fdl = FluDataLoader()
-        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date},
+        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, disease=run_config.disease},
                            ilinet_kwargs=ilinet_kwargs,
                            flusurvnet_kwargs=flusurvnet_kwargs,
                            sources=self.model_config.sources,
