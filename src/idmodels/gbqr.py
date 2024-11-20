@@ -37,6 +37,8 @@ class GBQRModel():
                            flusurvnet_kwargs=flusurvnet_kwargs,
                            sources=self.model_config.sources,
                            power_transform=self.model_config.power_transform)
+        if run_config.locations is not None:
+            df = df.loc[df["location"].isin(run_config.locations)]
         
         # augment data with features and target values
         df, feat_names = create_features_and_targets(

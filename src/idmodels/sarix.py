@@ -17,6 +17,8 @@ class SARIXModel():
         df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date},
                            sources=self.model_config.sources,
                            power_transform=self.model_config.power_transform)
+        if run_config.locations is not None:
+            df = df.loc[df["location"].isin(run_config.locations)]
         
         # season week relative to christmas
         df = df.merge(
