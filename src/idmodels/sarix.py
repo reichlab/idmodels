@@ -1,7 +1,7 @@
 
 import numpy as np
 import pandas as pd
-from iddata.loader import FluDataLoader
+from iddata.loader import DiseaseDataLoader
 from iddata.utils import get_holidays
 from sarix import sarix
 
@@ -13,8 +13,8 @@ class SARIXModel():
         self.model_config = model_config
 
     def run(self, run_config):
-        fdl = FluDataLoader()
-        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date},
+        fdl = DiseaseDataLoader()
+        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
                            sources=self.model_config.sources,
                            power_transform=self.model_config.power_transform)
         if run_config.locations is not None:
