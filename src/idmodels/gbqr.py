@@ -3,7 +3,7 @@ import time
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from iddata.loader import FluDataLoader
+from iddata.loader import DiseaseDataLoader
 from tqdm.autonotebook import tqdm
 
 from idmodels.preprocess import create_features_and_targets
@@ -31,8 +31,8 @@ class GBQRModel():
             ilinet_kwargs = {"scale_to_positive": False}
             flusurvnet_kwargs = {"burden_adj": False}
         
-        fdl = FluDataLoader()
-        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date},
+        fdl = DiseaseDataLoader()
+        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
                            ilinet_kwargs=ilinet_kwargs,
                            flusurvnet_kwargs=flusurvnet_kwargs,
                            sources=self.model_config.sources,
@@ -41,14 +41,20 @@ class GBQRModel():
             df = df.loc[df["location"].isin(run_config.locations)]
         
         # augment data with features and target values
+        if run_config.disease == "flu":
+            init_feats = ["inc_trans_cs", "season_week", "log_pop"]
+        elif run_config.disease == "covid":
+            init_feats = ["inc_trans_cs", "log_pop"]
+        
         df, feat_names = create_features_and_targets(
             df = df,
             incl_level_feats=self.model_config.incl_level_feats,
             max_horizon=run_config.max_horizon,
-            curr_feat_names=["inc_trans_cs", "season_week", "log_pop"])
+            curr_feat_names=init_feats)
         
         # keep only rows that are in-season
-        df = df.query("season_week >= 5 and season_week <= 45")
+        if run_config.disease == "flu":
+            df = df.query("season_week >= 5 and season_week <= 45")
         
         # "test set" df used to generate look-ahead predictions
         df_test = df.loc[df.wk_end_date == df.wk_end_date.max()] \
