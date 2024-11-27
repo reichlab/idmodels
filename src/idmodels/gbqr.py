@@ -153,7 +153,7 @@ class GBQRModel():
         preds_df["value"] = np.maximum(preds_df["value"], 0.0)
         
         # get predictions into the format needed for FluSight hub submission
-        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date)
+        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, run_config.disease)
         
         # sort quantiles to avoid quantile crossing
         preds_df = self._quantile_noncrossing(
@@ -248,7 +248,7 @@ class GBQRModel():
         return test_pred_qs_df
 
 
-    def _format_as_flusight_output(self, preds_df, ref_date):
+    def _format_as_flusight_output(self, preds_df, ref_date, disease):
         # keep just required columns and rename to match hub format
         preds_df = preds_df[["location", "wk_end_date", "horizon", "quantile", "value"]] \
             .rename(columns={"quantile": "output_type_id"})
@@ -256,7 +256,7 @@ class GBQRModel():
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")
         preds_df["reference_date"] = ref_date
         preds_df["horizon"] = (pd.to_timedelta(preds_df["target_end_date"].dt.date - ref_date).dt.days / 7).astype(int)
-        preds_df["target"] = "wk inc flu hosp"
+        preds_df["target"] = "wk inc " + disease + " hosp"
         
         preds_df["output_type"] = "quantile"
         preds_df.drop(columns="wk_end_date", inplace=True)
