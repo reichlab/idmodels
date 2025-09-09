@@ -20,6 +20,10 @@ botocore==1.35.36
     # via aiobotocore
 cfgv==3.4.0
     # via pre-commit
+colorama==0.4.6
+    # via
+    #   pytest
+    #   tqdm
 contourpy==1.3.0
     # via matplotlib
 coverage==7.6.4
@@ -38,7 +42,7 @@ frozenlist==1.5.0
     #   aiosignal
 fsspec==2024.10.0
     # via s3fs
-iddata @ git+https://github.com/reichlab/iddata@7d85f006345c8e17139588d24650509a1eef6af0
+iddata @ git+https://github.com/reichlab/iddata@5a3ef0ae4402693b3c8964e57dafc5020a65b605
     # via idmodels (pyproject.toml)
 identify==2.6.1
     # via pre-commit
