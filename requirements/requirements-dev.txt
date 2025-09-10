@@ -42,7 +42,7 @@ frozenlist==1.5.0
     #   aiosignal
 fsspec==2024.10.0
     # via s3fs
-iddata @ git+https://github.com/reichlab/iddata@5a3ef0ae4402693b3c8964e57dafc5020a65b605
+iddata @ git+https://github.com/reichlab/iddata@3ad0ac0dc6d7f14488628a49bfb5228ca0643e1b
     # via idmodels (pyproject.toml)
 identify==2.6.1
     # via pre-commit
