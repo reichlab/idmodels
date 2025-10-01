@@ -31,7 +31,7 @@ class SARIXModel():
         .assign(delta_xmas = lambda x: x["season_week"] - x["xmas_week"])
         df["xmas_spike"] = np.maximum(3 - np.abs(df["delta_xmas"]), 0)
         
-        xy_colnames = ["inc_trans_cs"] + self.model_config.x
+        xy_colnames = self.model_config.x + ["inc_trans_cs"]
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
         batched_xy = df[xy_colnames].values.reshape(len(df["location"].unique()), -1, len(xy_colnames))
         
