@@ -60,7 +60,7 @@ def test_sarix(tmp_path):
     )
 
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
-    with patch('idmodels.sarix._np_percentile', return_value=_np_percentile_val()):
+    with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()):
         model = SARIXModel(model_config)
         model.run(run_config)
 

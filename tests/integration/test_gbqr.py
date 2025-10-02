@@ -55,7 +55,7 @@ def test_gbqr(tmp_path):
     )
 
     # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
-    with patch.object(lightgbm.sklearn.LGBMModel, 'predict', return_value=_predictions_val()):
+    with patch.object(lightgbm.sklearn.LGBMModel, "predict", return_value=_predictions_val()):
         model = GBQRModel(model_config)
         model.run(run_config)
     actual_df = pd.read_csv(
