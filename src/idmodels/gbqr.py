@@ -1,4 +1,4 @@
-import time
+import calendar
 
 import lightgbm as lgb
 import numpy as np
@@ -187,7 +187,7 @@ class GBQRModel():
         Column names are given by `run_config.q_labels`.
         """
         # seed for random number generation, based on reference date
-        rng_seed = int(time.mktime(run_config.ref_date.timetuple()))
+        rng_seed = int(calendar.timegm(run_config.ref_date.timetuple()))
         rng = np.random.default_rng(seed=rng_seed)
         # seeds for lgb model fits, one per combination of bag and quantile level
         lgb_seeds = rng.integers(1e8, size=(self.model_config.num_bags, len(run_config.q_levels)))

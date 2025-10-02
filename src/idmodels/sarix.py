@@ -19,7 +19,7 @@ class SARIXModel():
                            power_transform=self.model_config.power_transform)
         if run_config.locations is not None:
             df = df.loc[df["location"].isin(run_config.locations)]
-        
+
         # season week relative to christmas
         df = df.merge(
             get_holidays() \
@@ -50,9 +50,9 @@ class SARIXModel():
             num_samples = run_config.num_samples,
             num_chains = run_config.num_chains
         )
-        
-        pred_qs = np.percentile(sarix_fit_all_locs_theta_pooled.predictions[..., :, :, 0],
-                                np.array(run_config.q_levels) * 100, axis=0)
+
+        pred_qs = _np_percentile(sarix_fit_all_locs_theta_pooled.predictions[..., :, :, 0],
+                                 np.array(run_config.q_levels) * 100, axis=0)
         
         df_nhsn_last_obs = df.groupby(["location"]).tail(1)
         
@@ -94,3 +94,10 @@ class SARIXModel():
             model_config=self.model_config
         )
         preds_df.to_csv(save_path, index=False)
+
+
+def _np_percentile(predictions, q_levels, axis):
+    """
+    Simple helper function to ease patching from unit tests.
+    """
+    return np.percentile(predictions, q_levels, axis)
