@@ -76,6 +76,74 @@ def test_sarix(tmp_path):
     assert_frame_equal(actual_df, expected_df)
 
 
+def test_sarix_shared_sigma_pooling_multiple_batches(tmp_path):
+    """Test that sigma_pooling='shared' works correctly with multiple batches (locations)."""
+    model_config = SimpleNamespace(
+        model_class = "sarix",
+        model_name = "sarix_p6_4rt_thetanone_sigmashared",
+
+        # data sources and adjustments for reporting issues
+        sources = ["nhsn"],
+
+        # fit locations separately or jointly
+        fit_locations_separately = False,
+
+        # SARI model parameters
+        p = 6,
+        P = 0,
+        d = 0,
+        D = 0,
+        season_period = 1,
+
+        # power transform applied to surveillance signals
+        power_transform = "4rt",
+
+        # sharing of information about parameters
+        theta_pooling="none",
+        sigma_pooling="shared",  # This is what we're testing
+
+        # covariates
+        x = []
+    )
+
+    # Use multiple locations to ensure we have multiple batches
+    run_config = SimpleNamespace(
+        disease="flu",
+        ref_date=datetime.date.fromisoformat("2024-01-06"),
+        output_root=tmp_path / "model-output",
+        artifact_store_root=tmp_path / "artifact-store",
+        save_feat_importance=False,
+        locations=["US", "01", "02", "04", "05"],  # Multiple locations = multiple batches
+        max_horizon=3,
+        q_levels = [0.025, 0.50, 0.975],
+        q_labels = ["0.025", "0.5", "0.975"],
+        num_warmup = 100,  # Reduced for faster testing
+        num_samples = 100,
+        num_chains = 1
+    )
+
+    model = SARIXModel(model_config)
+    model.run(run_config)
+
+    actual_df = pd.read_csv(
+        run_config.output_root / "UMass-sarix_p6_4rt_thetanone_sigmashared" /
+        "2024-01-06-UMass-sarix_p6_4rt_thetanone_sigmashared.csv"
+    )
+
+    # Verify the output has the expected structure
+    assert len(actual_df) > 0, "Output dataframe should not be empty"
+    assert set(actual_df["location"].unique()) == set(run_config.locations), \
+        "Output should contain predictions for all input locations"
+    assert all(actual_df["output_type"] == "quantile"), \
+        "All outputs should be quantiles"
+    assert set(actual_df["output_type_id"].unique()) == set(run_config.q_labels), \
+        "Output should contain all specified quantile levels"
+    assert actual_df["value"].notna().all(), \
+        "All predictions should be non-null"
+    assert (actual_df["value"] >= 0).all(), \
+        "All predictions should be non-negative"
+
+
 def _np_percentile_val():
     return numpy.array(
         [[[2.22541624e-01, 1.82324940e-01, 1.27709944e-01],
