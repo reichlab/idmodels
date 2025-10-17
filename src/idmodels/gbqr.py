@@ -31,12 +31,28 @@ class GBQRModel():
             ilinet_kwargs = {"scale_to_positive": False}
             flusurvnet_kwargs = {"burden_adj": False}
         
+        valid_sources = ["flusurvnet", "nhsn", "ilinet", "nssp"]
+        if ~np.isin(np.array(self.model_config.sources), valid_sources).all():
+          raise ValueError("For GBQR, the only supported data sources are 'nhsn', 'flusurvnet', 'ilinet', or 'nssp'.")
+        
+        # Check if both nhsn and nssp data are included as sources
+        if all(src in self.model_config.sources for src in ["nhsn", "nssp"]):
+            raise ValueError("Only one of 'nhsn' or 'nssp' may be selected as a data source.")
+        
         fdl = DiseaseDataLoader()
-        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
-                           ilinet_kwargs=ilinet_kwargs,
-                           flusurvnet_kwargs=flusurvnet_kwargs,
-                           sources=self.model_config.sources,
-                           power_transform=self.model_config.power_transform)
+        if "nhsn" in self.model_config.sources:
+            df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
+                               ilinet_kwargs=ilinet_kwargs,
+                               flusurvnet_kwargs=flusurvnet_kwargs,
+                               sources=self.model_config.sources,
+                               power_transform=self.model_config.power_transform)
+        elif "nssp" in self.model_config.sources:
+            df = fdl.load_data(nssp_kwargs={"as_of": None, "disease": run_config.disease},
+                               ilinet_kwargs=ilinet_kwargs,
+                               flusurvnet_kwargs=flusurvnet_kwargs,
+                               sources=self.model_config.sources,
+                               power_transform=self.model_config.power_transform)
+
         if run_config.locations is not None:
             df = df.loc[df["location"].isin(run_config.locations)]
         
@@ -133,7 +149,8 @@ class GBQRModel():
                         "inc_trans_cs", "horizon",
                         "inc_trans_center_factor", "inc_trans_scale_factor"]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
-        preds_df = preds_df.loc[(preds_df["source"] == "nhsn")]
+        # print(preds_df.loc[preds_df["source"] == "nhsn"])
+        preds_df = preds_df.loc[preds_df["source"].isin(["nhsn", "nssp"])]
         preds_df = pd.melt(preds_df,
                         id_vars=cols_to_keep,
                         var_name="quantile",
@@ -153,7 +170,12 @@ class GBQRModel():
         preds_df["value"] = np.maximum(preds_df["value"], 0.0)
         
         # get predictions into the format needed for FluSight hub submission
-        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, run_config.disease)
+        if "nhsn" in preds_df["source"].unique():
+            target_name = "wk inc " + run_config.disease + " hosp"
+        if "nssp" in preds_df["source"].unique():
+            target_name = "wk inc " + run_config.disease + " prop ed visits"
+
+        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, run_config.disease, target_name)
         
         # sort quantiles to avoid quantile crossing
         preds_df = self._quantile_noncrossing(
@@ -248,7 +270,7 @@ class GBQRModel():
         return test_pred_qs_df
 
 
-    def _format_as_flusight_output(self, preds_df, ref_date, disease):
+    def _format_as_flusight_output(self, preds_df, ref_date, disease, target_name):
         # keep just required columns and rename to match hub format
         preds_df = preds_df[["location", "wk_end_date", "horizon", "quantile", "value"]] \
             .rename(columns={"quantile": "output_type_id"})
@@ -256,7 +278,7 @@ class GBQRModel():
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")
         preds_df["reference_date"] = ref_date
         preds_df["horizon"] = (pd.to_timedelta(preds_df["target_end_date"].dt.date - ref_date).dt.days / 7).astype(int)
-        preds_df["target"] = "wk inc " + disease + " hosp"
+        preds_df["target"] = target_name
         
         preds_df["output_type"] = "quantile"
         preds_df.drop(columns="wk_end_date", inplace=True)
