@@ -13,10 +13,27 @@ class SARIXModel():
         self.model_config = model_config
 
     def run(self, run_config):
+        valid_sources = np.array(["nhsn", "nssp"])
+        if ~np.isin(np.array(self.model_config.sources), valid_sources).all():
+            raise ValueError("For SARIX, the only supported data sources are 'nhsn' or 'nssp'.")
+        
+        # Check if both nhsn and nssp data are included as sources
+        if all(src in self.model_config.sources for src in ["nhsn", "nssp"]):
+            raise ValueError("Only one of 'nhsn' or 'nssp' may be selected as a data source.")
+
         fdl = DiseaseDataLoader()
-        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
-                           sources=self.model_config.sources,
-                           power_transform=self.model_config.power_transform)
+        if "nhsn" in self.model_config.sources:
+            df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
+                               sources=self.model_config.sources,
+                               power_transform=self.model_config.power_transform)
+            target_name = "wk inc " + run_config.disease + " hosp"
+        elif "nssp" in self.model_config.sources:
+            df = fdl.load_data(nssp_kwargs={"as_of": None, "disease": run_config.disease},
+                               sources=self.model_config.sources,
+                               power_transform=self.model_config.power_transform)
+            df["source"].unique()
+            target_name = "wk inc " + run_config.disease + " prop ed visits"
+
         if run_config.locations is not None:
             df = df.loc[df["location"].isin(run_config.locations)]
 
@@ -33,6 +50,7 @@ class SARIXModel():
         
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
+        df["inc_trans_cs"] = np.where(~np.isnan(df["inc_trans_cs"]), df["inc_trans_cs"], 0)
         batched_xy = df[xy_colnames].values.reshape(len(df["location"].unique()), -1, len(xy_colnames))
         
         sarix_fit_all_locs_theta_pooled = sarix.SARIX(
@@ -54,18 +72,18 @@ class SARIXModel():
         pred_qs = _np_percentile(sarix_fit_all_locs_theta_pooled.predictions[..., :, :, 0],
                                  np.array(run_config.q_levels) * 100, axis=0)
         
-        df_nhsn_last_obs = df.groupby(["location"]).tail(1)
+        df_data_last_obs = df.groupby(["location"]).tail(1)
         
         preds_df = pd.concat([
             pd.DataFrame(pred_qs[i, :, :]) \
-            .set_axis(df_nhsn_last_obs["location"], axis="index") \
+            .set_axis(df_data_last_obs["location"], axis="index") \
             .set_axis(np.arange(1, run_config.max_horizon+1), axis="columns") \
             .assign(output_type_id = q_label) \
             for i, q_label in enumerate(run_config.q_labels)
         ]) \
         .reset_index() \
         .melt(["location", "output_type_id"], var_name="horizon") \
-        .merge(df_nhsn_last_obs, on="location", how="left")
+        .merge(df_data_last_obs, on="location", how="left")
         
         # build data frame with predictions on the original scale
         preds_df["value"] = (preds_df["value"] + preds_df["inc_trans_center_factor"]) * preds_df["inc_trans_scale_factor"]
@@ -84,9 +102,12 @@ class SARIXModel():
         preds_df["reference_date"] = run_config.ref_date
         preds_df["horizon"] = (pd.to_timedelta(preds_df["target_end_date"].dt.date - run_config.ref_date).dt.days / 7).astype(int)
         preds_df["output_type"] = "quantile"
-        preds_df["target"] = "wk inc " + run_config.disease + " hosp"
+        preds_df["target"] = target_name
         preds_df.drop(columns="wk_end_date", inplace=True)
         
+        if target_name == "wk inc " + run_config.disease + " prop ed visits":
+            preds_df["value"] = np.minimum(preds_df["value"], 1.0)
+
         # save
         save_path = build_save_path(
             root=run_config.output_root,
