@@ -149,7 +149,6 @@ class GBQRModel():
                         "inc_trans_cs", "horizon",
                         "inc_trans_center_factor", "inc_trans_scale_factor"]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
-        # print(preds_df.loc[preds_df["source"] == "nhsn"])
         preds_df = preds_df.loc[preds_df["source"].isin(["nhsn", "nssp"])]
         preds_df = pd.melt(preds_df,
                         id_vars=cols_to_keep,
@@ -174,6 +173,7 @@ class GBQRModel():
             target_name = "wk inc " + run_config.disease + " hosp"
         if "nssp" in preds_df["source"].unique():
             target_name = "wk inc " + run_config.disease + " prop ed visits"
+            preds_df["value"] = np.minimum(preds_df["value"], 1.0)
 
         preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, run_config.disease, target_name)
         
