@@ -32,7 +32,7 @@ frozenlist==1.5.0
     #   aiosignal
 fsspec==2024.10.0
     # via s3fs
-iddata @ git+https://github.com/reichlab/iddata@c5975648ba30e9a362a0854b7d7350d619b9d1e1
+iddata @ git+https://github.com/reichlab/iddata@c28849b2a02ab84e2f82876f16fee2ac60814877
     # via idmodels (pyproject.toml)
 idna==3.10
     # via yarl
@@ -117,7 +117,7 @@ rich==13.9.4
     # via iddata
 s3fs==2024.10.0
     # via iddata
-sarix @ git+https://github.com/elray1/sarix@1c8995942d49afbb66637f0dc0662e1248606af4
+sarix @ git+https://github.com/elray1/sarix@c8921734a4328a372cf23ff343e781bc08dd4d36
     # via idmodels (pyproject.toml)
 scikit-learn==1.5.2
     # via idmodels (pyproject.toml)
