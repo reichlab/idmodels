@@ -15,7 +15,7 @@ dependencies = [
     "lightgbm",
     "numpy",
     "pandas",
-    "sarix @ git+https://github.com/elray1/sarix",
+    "sarix @ git+https://github.com/reichlab/sarix",
     "scikit-learn",
     "tqdm",
     "timeseriesutils @ git+https://github.com/reichlab/timeseriesutils"

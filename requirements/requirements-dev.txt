@@ -43,18 +43,20 @@ frozenlist==1.5.0
 fsspec==2024.10.0
     # via s3fs
 iddata @ git+https://github.com/reichlab/iddata@c28849b2a02ab84e2f82876f16fee2ac60814877
-    # via idmodels (pyproject.toml)
+    # via
+    #   idmodels (pyproject.toml)
+    #   sarix
 identify==2.6.1
     # via pre-commit
 idna==3.10
     # via yarl
 iniconfig==2.0.0
     # via pytest
-jax==0.4.35
+jax==0.8.0
     # via
     #   numpyro
     #   sarix
-jaxlib==0.4.35
+jaxlib==0.8.0
     # via
     #   jax
     #   numpyro
@@ -100,7 +102,7 @@ numpy==2.1.3
     #   scikit-learn
     #   scipy
     #   timeseriesutils
-numpyro==0.15.3
+numpyro==0.19.0
     # via sarix
 opt-einsum==3.4.0
     # via jax
@@ -147,7 +149,7 @@ ruff==0.7.2
     # via idmodels (pyproject.toml)
 s3fs==2024.10.0
     # via iddata
-sarix @ git+https://github.com/elray1/sarix@c8921734a4328a372cf23ff343e781bc08dd4d36
+sarix @ git+https://github.com/reichlab/sarix@cbf66a64c6c1cc7d7385d23732583acb7dbcc0ae
     # via idmodels (pyproject.toml)
 scikit-learn==1.5.2
     # via idmodels (pyproject.toml)
