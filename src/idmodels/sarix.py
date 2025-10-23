@@ -31,7 +31,6 @@ class SARIXModel():
             df = fdl.load_data(nssp_kwargs={"as_of": None, "disease": run_config.disease},
                                sources=self.model_config.sources,
                                power_transform=self.model_config.power_transform)
-            df["source"].unique()
             target_name = "wk inc " + run_config.disease + " prop ed visits"
 
         if run_config.locations is not None:
