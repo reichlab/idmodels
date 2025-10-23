@@ -171,7 +171,7 @@ class GBQRModel():
         # get predictions into the format needed for FluSight hub submission
         if "nhsn" in preds_df["source"].unique():
             target_name = "wk inc " + run_config.disease + " hosp"
-        if "nssp" in preds_df["source"].unique():
+        elif "nssp" in preds_df["source"].unique():
             target_name = "wk inc " + run_config.disease + " prop ed visits"
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
 
