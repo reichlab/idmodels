@@ -14,7 +14,7 @@ class SARIXModel():
 
     def run(self, run_config):
         valid_sources = np.array(["nhsn", "nssp"])
-        if ~np.isin(np.array(self.model_config.sources), valid_sources).all():
+        if not np.isin(np.array(self.model_config.sources), valid_sources).all():
             raise ValueError("For SARIX, the only supported data sources are 'nhsn' or 'nssp'.")
         
         # Check if both nhsn and nssp data are included as sources

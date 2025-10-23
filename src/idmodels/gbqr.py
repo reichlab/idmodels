@@ -32,7 +32,7 @@ class GBQRModel():
             flusurvnet_kwargs = {"burden_adj": False}
         
         valid_sources = ["flusurvnet", "nhsn", "ilinet", "nssp"]
-        if ~np.isin(np.array(self.model_config.sources), valid_sources).all():
+        if not np.isin(np.array(self.model_config.sources), valid_sources).all():
           raise ValueError("For GBQR, the only supported data sources are 'nhsn', 'flusurvnet', 'ilinet', or 'nssp'.")
         
         # Check if both nhsn and nssp data are included as sources
