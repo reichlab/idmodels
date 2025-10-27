@@ -43,9 +43,7 @@ frozenlist==1.5.0
 fsspec==2024.10.0
     # via s3fs
 iddata @ git+https://github.com/reichlab/iddata@c28849b2a02ab84e2f82876f16fee2ac60814877
-    # via
-    #   idmodels (pyproject.toml)
-    #   sarix
+    # via idmodels (pyproject.toml)
 identify==2.6.1
     # via pre-commit
 idna==3.10
@@ -114,7 +112,6 @@ pandas==2.2.3
     # via
     #   idmodels (pyproject.toml)
     #   iddata
-    #   sarix
     #   timeseriesutils
 pillow==11.0.0
     # via matplotlib
@@ -149,7 +146,7 @@ ruff==0.7.2
     # via idmodels (pyproject.toml)
 s3fs==2024.10.0
     # via iddata
-sarix @ git+https://github.com/reichlab/sarix@5af386cd4efba9287dae1893659d87607115427f
+sarix @ git+https://github.com/reichlab/sarix@cedaebed367d9fc00e2b34cdfc6db09eef6a99a3
     # via idmodels (pyproject.toml)
 scikit-learn==1.5.2
     # via idmodels (pyproject.toml)
