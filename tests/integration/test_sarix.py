@@ -136,7 +136,8 @@ def test_sarix_shared_sigma_pooling_multiple_batches(tmp_path):
         "Output should contain predictions for all input locations"
     assert all(actual_df["output_type"] == "quantile"), \
         "All outputs should be quantiles"
-    assert set(actual_df["output_type_id"].unique()) == set(run_config.q_labels), \
+    # Convert output_type_id to string for comparison since pandas may infer numeric types
+    assert set(actual_df["output_type_id"].astype(str).unique()) == set(run_config.q_labels), \
         "Output should contain all specified quantile levels"
     assert actual_df["value"].notna().all(), \
         "All predictions should be non-null"

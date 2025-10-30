@@ -106,6 +106,8 @@ class SARIXModel():
             run_config=run_config,
             model_config=self.model_config
         )
+        # Ensure output_type_id is string to avoid pandas inferring it as float when reading
+        preds_df["output_type_id"] = preds_df["output_type_id"].astype(str)
         preds_df.to_csv(save_path, index=False)
 
 
