@@ -116,12 +116,14 @@ class SARIXFourierModel(SARIXModel):
     SARIX model with Fourier seasonality terms.
 
     Adds annual seasonal patterns using Fourier harmonics to the base SARIX model.
-    Requires fourier_K parameter in model_config to specify number of harmonic pairs.
+
+    Required model_config parameters:
+    - fourier_K: Number of Fourier harmonic pairs (int)
+    - fourier_pooling: How to share Fourier coefficients across locations ('none' or 'shared')
     """
     def _get_sarix_module(self):
-        """Return the sarix_fourier module for Fourier-enhanced fitting."""
-        from sarixfourier import sarix_fourier
-        return sarix_fourier
+        """Return the sarix module (same module, but with Fourier parameters)."""
+        return sarix
 
     def _get_extra_sarix_params(self, df):
         """Return Fourier-specific parameters for SARIX constructor."""
@@ -131,7 +133,8 @@ class SARIXFourierModel(SARIXModel):
 
         return {
             "day_of_year": day_of_year,
-            "fourier_K": self.model_config.fourier_K
+            "fourier_K": self.model_config.fourier_K,
+            "fourier_pooling": self.model_config.fourier_pooling
         }
 
 
