@@ -105,6 +105,7 @@ class SARIXModel():
         preds_df.drop(columns="wk_end_date", inplace=True)
         
         if target_name == "wk inc " + run_config.disease + " prop ed visits":
+            preds_df["value"] = preds_df["value"] / 100 # percentage to proportion
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
 
         # save
