@@ -142,7 +142,7 @@ ruff==0.7.2
     # via idmodels (pyproject.toml)
 s3fs==2024.10.0
     # via iddata
-sarix @ git+https://github.com/reichlab/sarix@cedaebed367d9fc00e2b34cdfc6db09eef6a99a3
+sarix @ git+https://github.com/reichlab/sarix@35eea2379a9790e0457b1aed41d13509e5d5056f
     # via idmodels (pyproject.toml)
 scikit-learn==1.5.2
     # via idmodels (pyproject.toml)
