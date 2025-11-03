@@ -7,7 +7,7 @@ import numpy
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
-from idmodels.sarix import SARIXModel, SARIXFourierModel
+from idmodels.sarix import SARIXFourierModel, SARIXModel
 
 
 def test_sarix(tmp_path):
