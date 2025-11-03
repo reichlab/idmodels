@@ -12,10 +12,6 @@ class SARIXModel():
     def __init__(self, model_config):
         self.model_config = model_config
 
-    def _get_sarix_module(self):
-        """Return the sarix module to use for fitting."""
-        return sarix
-
     def _get_extra_sarix_params(self, df):
         """Return extra parameters to pass to SARIX constructor. Returns empty dict by default."""
         return {}
@@ -38,16 +34,15 @@ class SARIXModel():
             on="season") \
         .assign(delta_xmas = lambda x: x["season_week"] - x["xmas_week"])
         df["xmas_spike"] = np.maximum(3 - np.abs(df["delta_xmas"]), 0)
-        
+
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
         batched_xy = df[xy_colnames].values.reshape(len(df["location"].unique()), -1, len(xy_colnames))
 
-        # Get the appropriate sarix module and any extra parameters
-        sarix_module = self._get_sarix_module()
+        # Get any extra parameters for the SARIX constructor
         extra_params = self._get_extra_sarix_params(df)
 
-        sarix_fit_all_locs_theta_pooled = sarix_module.SARIX(
+        sarix_fit_all_locs_theta_pooled = sarix.SARIX(
             xy = batched_xy,
             p = self.model_config.p,
             d = self.model_config.d,
@@ -121,10 +116,6 @@ class SARIXFourierModel(SARIXModel):
     - fourier_K: Number of Fourier harmonic pairs (int)
     - fourier_pooling: How to share Fourier coefficients across locations ('none' or 'shared')
     """
-    def _get_sarix_module(self):
-        """Return the sarix module (same module, but with Fourier parameters)."""
-        return sarix
-
     def _get_extra_sarix_params(self, df):
         """Return Fourier-specific parameters for SARIX constructor."""
         # Extract day-of-year from dates for Fourier features
