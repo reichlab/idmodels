@@ -12,6 +12,10 @@ class SARIXModel():
     def __init__(self, model_config):
         self.model_config = model_config
 
+    def _get_extra_sarix_params(self, df):
+        """Return extra parameters to pass to SARIX constructor. Returns empty dict by default."""
+        return {}
+
     def run(self, run_config):
         fdl = DiseaseDataLoader()
         df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
@@ -30,11 +34,14 @@ class SARIXModel():
             on="season") \
         .assign(delta_xmas = lambda x: x["season_week"] - x["xmas_week"])
         df["xmas_spike"] = np.maximum(3 - np.abs(df["delta_xmas"]), 0)
-        
+
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
         batched_xy = df[xy_colnames].values.reshape(len(df["location"].unique()), -1, len(xy_colnames))
-        
+
+        # Get any extra parameters for the SARIX constructor
+        extra_params = self._get_extra_sarix_params(df)
+
         sarix_fit_all_locs_theta_pooled = sarix.SARIX(
             xy = batched_xy,
             p = self.model_config.p,
@@ -48,7 +55,8 @@ class SARIXModel():
             forecast_horizon = run_config.max_horizon,
             num_warmup = run_config.num_warmup,
             num_samples = run_config.num_samples,
-            num_chains = run_config.num_chains
+            num_chains = run_config.num_chains,
+            **extra_params
         )
 
         pred_qs = _np_percentile(sarix_fit_all_locs_theta_pooled.predictions[..., :, :, 0],
@@ -93,7 +101,32 @@ class SARIXModel():
             run_config=run_config,
             model_config=self.model_config
         )
+        # Ensure output_type_id is string to avoid pandas inferring it as float when reading
+        preds_df["output_type_id"] = preds_df["output_type_id"].astype(str)
         preds_df.to_csv(save_path, index=False)
+
+
+class SARIXFourierModel(SARIXModel):
+    """
+    SARIX model with Fourier seasonality terms.
+
+    Adds annual seasonal patterns using Fourier harmonics to the base SARIX model.
+
+    Required model_config parameters:
+    - fourier_K: Number of Fourier harmonic pairs (int)
+    - fourier_pooling: How to share Fourier coefficients across locations ('none' or 'shared')
+    """
+    def _get_extra_sarix_params(self, df):
+        """Return Fourier-specific parameters for SARIX constructor."""
+        # Extract day-of-year from dates for Fourier features
+        # Take the first location's dates (same for all locations after reshaping)
+        day_of_year = df.groupby("location")["wk_end_date"].apply(lambda x: x.dt.dayofyear.values).iloc[0]
+
+        return {
+            "day_of_year": day_of_year,
+            "fourier_K": self.model_config.fourier_K,
+            "fourier_pooling": self.model_config.fourier_pooling
+        }
 
 
 def _np_percentile(predictions, q_levels, axis):

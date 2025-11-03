@@ -7,7 +7,7 @@ import numpy
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
-from idmodels.sarix import SARIXModel
+from idmodels.sarix import SARIXFourierModel, SARIXModel
 
 
 def test_sarix(tmp_path):
@@ -74,6 +74,263 @@ def test_sarix(tmp_path):
         "2024-01-06-UMass-sarix_p6_4rt_thetashared_sigmanone.csv"
     )
     assert_frame_equal(actual_df, expected_df)
+
+
+def test_sarix_shared_sigma_pooling_multiple_batches(tmp_path):
+    """Test that sigma_pooling='shared' works correctly with multiple batches (locations)."""
+    model_config = SimpleNamespace(
+        model_class = "sarix",
+        model_name = "sarix_p6_4rt_thetanone_sigmashared",
+
+        # data sources and adjustments for reporting issues
+        sources = ["nhsn"],
+
+        # fit locations separately or jointly
+        fit_locations_separately = False,
+
+        # SARI model parameters
+        p = 6,
+        P = 0,
+        d = 0,
+        D = 0,
+        season_period = 1,
+
+        # power transform applied to surveillance signals
+        power_transform = "4rt",
+
+        # sharing of information about parameters
+        theta_pooling="none",
+        sigma_pooling="shared",  # This is what we're testing
+
+        # covariates
+        x = []
+    )
+
+    # Use multiple locations to ensure we have multiple batches
+    run_config = SimpleNamespace(
+        disease="flu",
+        ref_date=datetime.date.fromisoformat("2024-01-06"),
+        output_root=tmp_path / "model-output",
+        artifact_store_root=tmp_path / "artifact-store",
+        save_feat_importance=False,
+        locations=["US", "01", "02", "04", "05"],  # Multiple locations = multiple batches
+        max_horizon=3,
+        q_levels = [0.025, 0.50, 0.975],
+        q_labels = ["0.025", "0.5", "0.975"],
+        num_warmup = 100,  # Reduced for faster testing
+        num_samples = 100,
+        num_chains = 1
+    )
+
+    model = SARIXModel(model_config)
+    model.run(run_config)
+
+    actual_df = pd.read_csv(
+        run_config.output_root / "UMass-sarix_p6_4rt_thetanone_sigmashared" /
+        "2024-01-06-UMass-sarix_p6_4rt_thetanone_sigmashared.csv"
+    )
+
+    # Verify the output has the expected structure
+    assert len(actual_df) > 0, "Output dataframe should not be empty"
+    assert set(actual_df["location"].unique()) == set(run_config.locations), \
+        "Output should contain predictions for all input locations"
+    assert all(actual_df["output_type"] == "quantile"), \
+        "All outputs should be quantiles"
+    # Convert output_type_id to string for comparison since pandas may infer numeric types
+    assert set(actual_df["output_type_id"].astype(str).unique()) == set(run_config.q_labels), \
+        "Output should contain all specified quantile levels"
+    assert actual_df["value"].notna().all(), \
+        "All predictions should be non-null"
+    assert (actual_df["value"] >= 0).all(), \
+        "All predictions should be non-negative"
+
+
+def test_sarix_fourier_none_pooling(tmp_path):
+    """Test SARIXFourierModel with fourier_pooling='none' (unpooled)."""
+    model_config = SimpleNamespace(
+        model_class="sarix_fourier",
+        model_name="sarix_p2_fourier_K2_none",
+
+        # data sources
+        sources=["nhsn"],
+
+        # fit locations separately or jointly
+        fit_locations_separately=False,
+
+        # SARIX model parameters
+        p=2,
+        P=0,
+        d=0,
+        D=0,
+        season_period=1,
+
+        # power transform
+        power_transform="4rt",
+
+        # parameter pooling
+        theta_pooling="shared",
+        sigma_pooling="shared",
+
+        # Fourier parameters
+        fourier_K=2,
+        fourier_pooling="none",  # Unpooled Fourier coefficients
+
+        # covariates
+        x=[]
+    )
+
+    # Use subset of locations for faster testing
+    run_config = SimpleNamespace(
+        disease="flu",
+        ref_date=datetime.date.fromisoformat("2024-01-06"),
+        output_root=tmp_path / "model-output",
+        artifact_store_root=tmp_path / "artifact-store",
+        save_feat_importance=False,
+        locations=["US", "01", "02", "04", "05"],
+        max_horizon=2,  # Reduced for faster testing
+        q_levels=[0.025, 0.50, 0.975],
+        q_labels=["0.025", "0.5", "0.975"],
+        num_warmup=50,  # Reduced for faster testing
+        num_samples=50,
+        num_chains=1
+    )
+
+    model = SARIXFourierModel(model_config)
+    model.run(run_config)
+
+    # Verify output structure
+    actual_df = pd.read_csv(
+        run_config.output_root / "UMass-sarix_p2_fourier_K2_none" /
+        "2024-01-06-UMass-sarix_p2_fourier_K2_none.csv"
+    )
+
+    # Assertions
+    assert len(actual_df) > 0, "Output dataframe should not be empty"
+    assert set(actual_df["location"].unique()) == set(run_config.locations), \
+        "Output should contain predictions for all input locations"
+    assert all(actual_df["output_type"] == "quantile"), \
+        "All outputs should be quantiles"
+    assert set(actual_df["output_type_id"].astype(str).unique()) == set(run_config.q_labels), \
+        "Output should contain all specified quantile levels"
+    assert actual_df["value"].notna().all(), \
+        "All predictions should be non-null"
+    assert (actual_df["value"] >= 0).all(), \
+        "All predictions should be non-negative"
+
+
+def test_sarix_fourier_shared_pooling(tmp_path):
+    """Test SARIXFourierModel with fourier_pooling='shared' (pooled across locations)."""
+    model_config = SimpleNamespace(
+        model_class="sarix_fourier",
+        model_name="sarix_p2_fourier_K2_shared",
+
+        # data sources
+        sources=["nhsn"],
+
+        # fit locations separately or jointly
+        fit_locations_separately=False,
+
+        # SARIX model parameters
+        p=2,
+        P=0,
+        d=0,
+        D=0,
+        season_period=1,
+
+        # power transform
+        power_transform="4rt",
+
+        # parameter pooling
+        theta_pooling="shared",
+        sigma_pooling="shared",
+
+        # Fourier parameters
+        fourier_K=2,
+        fourier_pooling="shared",  # Shared Fourier coefficients
+
+        # covariates
+        x=[]
+    )
+
+    # Use subset of locations for faster testing
+    run_config = SimpleNamespace(
+        disease="flu",
+        ref_date=datetime.date.fromisoformat("2024-01-06"),
+        output_root=tmp_path / "model-output",
+        artifact_store_root=tmp_path / "artifact-store",
+        save_feat_importance=False,
+        locations=["US", "01", "02", "04", "05"],
+        max_horizon=2,
+        q_levels=[0.025, 0.50, 0.975],
+        q_labels=["0.025", "0.5", "0.975"],
+        num_warmup=50,
+        num_samples=50,
+        num_chains=1
+    )
+
+    model = SARIXFourierModel(model_config)
+    model.run(run_config)
+
+    # Verify output structure
+    actual_df = pd.read_csv(
+        run_config.output_root / "UMass-sarix_p2_fourier_K2_shared" /
+        "2024-01-06-UMass-sarix_p2_fourier_K2_shared.csv"
+    )
+
+    # Assertions
+    assert len(actual_df) > 0, "Output dataframe should not be empty"
+    assert set(actual_df["location"].unique()) == set(run_config.locations), \
+        "Output should contain predictions for all input locations"
+    assert all(actual_df["output_type"] == "quantile"), \
+        "All outputs should be quantiles"
+    assert set(actual_df["output_type_id"].astype(str).unique()) == set(run_config.q_labels), \
+        "Output should contain all specified quantile levels"
+    assert actual_df["value"].notna().all(), \
+        "All predictions should be non-null"
+    assert (actual_df["value"] >= 0).all(), \
+        "All predictions should be non-negative"
+
+
+def test_sarix_fourier_missing_pooling_parameter():
+    """Test that SARIXFourierModel raises error when fourier_pooling is missing."""
+    model_config = SimpleNamespace(
+        model_class="sarix_fourier",
+        model_name="sarix_p2_fourier_K2_nopooling",
+        sources=["nhsn"],
+        fit_locations_separately=False,
+        p=2, P=0, d=0, D=0, season_period=1,
+        power_transform="4rt",
+        theta_pooling="shared",
+        sigma_pooling="shared",
+        fourier_K=2,
+        # fourier_pooling is MISSING - should cause error
+        x=[]
+    )
+
+    run_config = SimpleNamespace(
+        disease="flu",
+        ref_date=datetime.date.fromisoformat("2024-01-06"),
+        output_root=Path("/tmp") / "model-output",
+        artifact_store_root=Path("/tmp") / "artifact-store",
+        save_feat_importance=False,
+        locations=["US"],
+        max_horizon=1,
+        q_levels=[0.5],
+        q_labels=["0.5"],
+        num_warmup=10,
+        num_samples=10,
+        num_chains=1
+    )
+
+    model = SARIXFourierModel(model_config)
+
+    # Should raise AttributeError when trying to access missing fourier_pooling
+    try:
+        model.run(run_config)
+        assert False, "Should have raised AttributeError for missing fourier_pooling"
+    except AttributeError as e:
+        assert "fourier_pooling" in str(e), \
+            f"Error should mention fourier_pooling, got: {str(e)}"
 
 
 def _np_percentile_val():

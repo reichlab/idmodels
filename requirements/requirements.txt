@@ -18,8 +18,6 @@ attrs==24.2.0
     #   pymmwr
 botocore==1.35.36
     # via aiobotocore
-colorama==0.4.6
-    # via tqdm
 contourpy==1.3.0
     # via matplotlib
 cycler==0.12.1
@@ -32,15 +30,15 @@ frozenlist==1.5.0
     #   aiosignal
 fsspec==2024.10.0
     # via s3fs
-iddata @ git+https://github.com/reichlab/iddata@3ad0ac0dc6d7f14488628a49bfb5228ca0643e1b
+iddata @ git+https://github.com/reichlab/iddata@c28849b2a02ab84e2f82876f16fee2ac60814877
     # via idmodels (pyproject.toml)
 idna==3.10
     # via yarl
-jax==0.4.35
+jax==0.8.0
     # via
     #   numpyro
     #   sarix
-jaxlib==0.4.35
+jaxlib==0.8.0
     # via
     #   jax
     #   numpyro
@@ -84,7 +82,7 @@ numpy==2.1.3
     #   scikit-learn
     #   scipy
     #   timeseriesutils
-numpyro==0.15.3
+numpyro==0.19.0
     # via sarix
 opt-einsum==3.4.0
     # via jax
@@ -94,7 +92,6 @@ pandas==2.2.3
     # via
     #   idmodels (pyproject.toml)
     #   iddata
-    #   sarix
     #   timeseriesutils
 pillow==11.0.0
     # via matplotlib
@@ -117,7 +114,7 @@ rich==13.9.4
     # via iddata
 s3fs==2024.10.0
     # via iddata
-sarix @ git+https://github.com/elray1/sarix@1c8995942d49afbb66637f0dc0662e1248606af4
+sarix @ git+https://github.com/reichlab/sarix@35eea2379a9790e0457b1aed41d13509e5d5056f
     # via idmodels (pyproject.toml)
 scikit-learn==1.5.2
     # via idmodels (pyproject.toml)
