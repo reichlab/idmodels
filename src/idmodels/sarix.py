@@ -33,8 +33,15 @@ class SARIXModel():
                                power_transform=self.model_config.power_transform)
             target_name = "wk inc " + run_config.disease + " prop ed visits"
 
-        if run_config.locations is not None:
-            df = df.loc[df["location"].isin(run_config.locations)]
+        if (run_config.states == []) & (run_config.hsas == []):
+            raise ValueError("User must request a non-empty set of locations to forecast for.")
+
+        if (run_config.states != []) & (run_config.hsas != []):
+            raise NotImplementedError("Functionality for simultaneously forecasting state- and hsa-level locations is not yet implemented.")
+        
+        df_states = df.loc[(df["location"].isin(run_config.states)) & (df["agg_level"] != "hsa")]
+        df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
+        df = pd.concat([df_states, df_hsas], join = "inner", axis = 0)
 
         # season week relative to christmas
         df = df.merge(
@@ -46,11 +53,11 @@ class SARIXModel():
             on="season") \
         .assign(delta_xmas = lambda x: x["season_week"] - x["xmas_week"])
         df["xmas_spike"] = np.maximum(3 - np.abs(df["delta_xmas"]), 0)
-        
+   
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
-        df["inc_trans_cs"] = np.where(~np.isnan(df["inc_trans_cs"]), df["inc_trans_cs"], 0)
-        batched_xy = df[xy_colnames].values.reshape(len(df["location"].unique()), -1, len(xy_colnames))
+        unique_locations = len(run_config.states) + len(run_config.hsas)
+        batched_xy = df[xy_colnames].values.reshape(unique_locations, -1, len(xy_colnames))
         
         sarix_fit_all_locs_theta_pooled = sarix.SARIX(
             xy = batched_xy,
@@ -71,7 +78,7 @@ class SARIXModel():
         pred_qs = _np_percentile(sarix_fit_all_locs_theta_pooled.predictions[..., :, :, 0],
                                  np.array(run_config.q_levels) * 100, axis=0)
         
-        df_data_last_obs = df.groupby(["location"]).tail(1)
+        df_data_last_obs = df.groupby(["location", "agg_level"]).tail(1)
         
         preds_df = pd.concat([
             pd.DataFrame(pred_qs[i, :, :]) \
