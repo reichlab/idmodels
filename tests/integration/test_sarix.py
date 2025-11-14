@@ -1,4 +1,5 @@
 import datetime
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -9,6 +10,17 @@ from pandas.testing import assert_frame_equal
 
 from idmodels.sarix import SARIXModel
 
+
+# Co-written with Claude
+def test_combined_state_and_hsa_fail(tmp_path):
+    date = datetime.date.fromisoformat("2025-09-27")
+    model_config = create_test_sarix_model_config(main_source=["nssp"])
+    run_config = create_test_sarix_run_config(ref_date=date, states=["44"], hsas=["1", "25"], tmp_path=tmp_path)
+    
+    with pytest.raises(NotImplementedError, match="simultaneously forecasting"):
+        model = SARIXModel(model_config)
+        model.run(run_config)
+        raise NotImplementedError("simultaneously forecasting")
 
 def test_sarix_nhsn(tmp_path):
     date = datetime.date.fromisoformat("2024-01-06")
@@ -38,21 +50,33 @@ def test_sarix_nhsn(tmp_path):
     assert_frame_equal(actual_df, expected_df)
 
 
-def test_sarix_nssp(tmp_path):
-    date = datetime.date.fromisoformat("2025-09-27")
+@pytest.mark.parametrize("fips_codes, nci_ids", [
     # Missouri (29) does not submit to NSSP
-    fips_codes = ["US", "01", "02", "04", "05", "06", "08", "09", "10", "11",
-                "12", "13", "15", "16", "17", "18", "19", "20", "21", "22",
-                "23", "24", "25", "26", "27", "28", "30", "31", "32",
-                "33", "34", "35", "36", "37", "38", "39", "40", "41", "42",
-                "44", "45", "46", "47", "48", "49", "50", "51", "53", "54",
-                "55", "56"]
+    (["US", "01", "02", "04", "05", "06", "08", "09", "10", "11",
+    "12", "13", "15", "16", "17", "18", "19", "20", "21", "22",
+    "23", "24", "25", "26", "27", "28", "30", "31", "32",
+    "33", "34", "35", "36", "37", "38", "39", "40", "41", "42",
+    "44", "45", "46", "47", "48", "49", "50", "51", "53", "54",
+    "55", "56"],
+    []),
+    
+    ([],
+    ["1", "25", "150"])
+])
+def test_sarix_nssp(tmp_path, fips_codes, nci_ids):
+    date = datetime.date.fromisoformat("2025-09-27")
     model_config = create_test_sarix_model_config(main_source=["nssp"])
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
+    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=nci_ids, tmp_path=tmp_path)
     
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
-    # nssp data only covers 51 locations
-    with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()[:, 0:51, :]):
+    if fips_codes != []:
+        locs_len = 51 # nssp data only covers 51 locations
+        agg_level = "state"
+    else:
+        locs_len = 3 # only forecast for 3 hsas
+        agg_level = "hsa"
+    
+    with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()[:, 0:locs_len, :]):
         model = SARIXModel(model_config)
         model.run(run_config)
 
@@ -63,11 +87,10 @@ def test_sarix_nssp(tmp_path):
     expected_df = pd.read_csv(
         Path("tests") / "integration" / "data" /
         f"UMass-{model_config.model_name}" / 
-        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
+        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-{agg_level}.csv"
     )
     assert_frame_equal(actual_df, expected_df)
 
-    # hsas=["25", "150"]
 
 def create_test_sarix_model_config(main_source):
     model_config = SimpleNamespace(
