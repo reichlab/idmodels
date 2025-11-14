@@ -98,8 +98,16 @@ class SARIXModel():
         else:
             preds_df["value"] = np.maximum(preds_df["value"], 0.0) ** 2
         
-        preds_df["value"] = (preds_df["value"] - 0.01 - 0.75**4) * preds_df["pop"] / 100000
+        preds_df["value"] = (preds_df["value"] - 0.01 - 0.75**4)
         preds_df["value"] = np.maximum(preds_df["value"], 0.0)
+        
+        if "nhsn" in preds_df["source"].unique():
+            # turn nhsn rates back into counts
+            preds_df["value"] = preds_df["value"] * preds_df["pop"] / 100000
+        
+        if target_name == "wk inc " + run_config.disease + " prop ed visits":
+            preds_df["value"] = preds_df["value"] / 100 # percentage to proportion
+            preds_df["value"] = np.minimum(preds_df["value"], 1.0)
         
         # keep just required columns and rename to match hub format
         preds_df = preds_df[["location", "wk_end_date", "horizon", "output_type_id", "value"]]
@@ -110,10 +118,6 @@ class SARIXModel():
         preds_df["output_type"] = "quantile"
         preds_df["target"] = target_name
         preds_df.drop(columns="wk_end_date", inplace=True)
-        
-        if target_name == "wk inc " + run_config.disease + " prop ed visits":
-            preds_df["value"] = preds_df["value"] / 100 # percentage to proportion
-            preds_df["value"] = np.minimum(preds_df["value"], 1.0)
 
         # save
         save_path = build_save_path(

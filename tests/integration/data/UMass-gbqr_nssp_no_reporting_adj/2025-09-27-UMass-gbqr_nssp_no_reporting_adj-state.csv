@@ -31,7 +31,7 @@ location,reference_date,horizon,target_end_date,target,output_type,output_type_i
 34,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.025,0.0
 35,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.025,0.0
 36,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.025,0.0
-37,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.025,0.006863995228158392
+37,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.025,6.33473391114292e-05
 38,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.025,0.0
 39,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.025,0.0
 40,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.025,0.0
@@ -184,7 +184,7 @@ US,2025-09-27,2,2025-10-11,wk inc flu prop ed visits,quantile,0.025,0.0
 34,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.5,0.0
 35,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.5,0.0
 36,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.5,0.0
-37,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.5,0.006863995228158392
+37,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.5,6.33473391114292e-05
 38,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.5,0.0
 39,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.5,0.0
 40,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.5,0.0
@@ -337,7 +337,7 @@ US,2025-09-27,2,2025-10-11,wk inc flu prop ed visits,quantile,0.5,0.0
 34,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.975,0.0
 35,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.975,0.0
 36,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.975,0.0
-37,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.975,0.006863995228158392
+37,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.975,6.33473391114292e-05
 38,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.975,0.0
 39,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.975,0.0
 40,2025-09-27,0,2025-09-27,wk inc flu prop ed visits,quantile,0.975,0.0

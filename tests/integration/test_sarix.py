@@ -61,7 +61,7 @@ def test_sarix_nhsn(tmp_path):
     []),
     
     ([],
-    ["1", "25", "150"])
+    ["1", "25", "99"])
 ])
 def test_sarix_nssp(tmp_path, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-09-27")

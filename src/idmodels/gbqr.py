@@ -172,17 +172,19 @@ class GBQRModel():
         else:
             raise ValueError('unsupported power_transform: must be "4rt" or None')
         
-        preds_df["value"] = (np.maximum(preds_df["inc_trans_target_hat"], 0.0) ** inv_power - 0.01 - 0.75**4) * preds_df["pop"] / 100000
-        preds_df["value"] = np.maximum(preds_df["value"], 0.0)
+        preds_df["value"] = (np.maximum(preds_df["inc_trans_target_hat"], 0.0) ** inv_power - 0.01 - 0.75**4)
         
         # get predictions into the format needed for FluSight hub submission
         if "nhsn" in preds_df["source"].unique():
+            # turn nhsn rates back into counts
+            preds_df["value"] = preds_df["value"] * preds_df["pop"] / 100000
             target_name = "wk inc " + run_config.disease + " hosp"
         elif "nssp" in preds_df["source"].unique():
-            target_name = "wk inc " + run_config.disease + " prop ed visits"
             preds_df["value"] = preds_df["value"] / 100 # percentage to proportion
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
+            target_name = "wk inc " + run_config.disease + " prop ed visits"
 
+        preds_df["value"] = np.maximum(preds_df["value"], 0.0)
         preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, target_name)
         
         # sort quantiles to avoid quantile crossing
