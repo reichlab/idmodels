@@ -53,9 +53,16 @@ class GBQRModel():
                                sources=self.model_config.sources,
                                power_transform=self.model_config.power_transform)
 
-        if run_config.locations is not None:
-            df = df.loc[df["location"].isin(run_config.locations)]
+        if (run_config.states == []) & (run_config.hsas == []):
+            raise ValueError("User must request a non-empty set of locations to forecast for.")
+
+        if (run_config.states != []) & (run_config.hsas != []):
+            raise NotImplementedError("Functionality for simultaneously forecasting state- and hsa-level locations is not yet implemented.")
         
+        df_states = df.loc[(df["location"].isin(run_config.states)) & (df["agg_level"] != "hsa")]
+        df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
+        df = pd.concat([df_states, df_hsas], join = "inner", axis = 0)
+
         # augment data with features and target values
         if run_config.disease == "flu":
             init_feats = ["inc_trans_cs", "season_week", "log_pop"]
@@ -176,7 +183,7 @@ class GBQRModel():
             preds_df["value"] = preds_df["value"] / 100 # percentage to proportion
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
 
-        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, run_config.disease, target_name)
+        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, target_name)
         
         # sort quantiles to avoid quantile crossing
         preds_df = self._quantile_noncrossing(
@@ -271,7 +278,7 @@ class GBQRModel():
         return test_pred_qs_df
 
 
-    def _format_as_flusight_output(self, preds_df, ref_date, disease, target_name):
+    def _format_as_flusight_output(self, preds_df, ref_date, target_name):
         # keep just required columns and rename to match hub format
         preds_df = preds_df[["location", "wk_end_date", "horizon", "quantile", "value"]] \
             .rename(columns={"quantile": "output_type_id"})
