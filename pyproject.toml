@@ -28,6 +28,11 @@ dev = [
     "pytest",
     "ruff"
 ]
+examples = [
+    "jupyter",
+    "matplotlib",
+    "plotly"
+]
 
 [project.urls]
 Repository = "https://github.com/reichlab/idmodels.git"
@@ -42,8 +47,11 @@ testpaths = [
     "tests",
 ]
 
-[tools.setuptools]
-packages = ["idmodels"]
+[tool.setuptools]
+packages = {find = {where = ["src"]}}
+
+[tool.setuptools.package-data]
+idmodels = ["data/*.csv", "data/*.md"]
 
 [tool.ruff]
 line-length = 120
