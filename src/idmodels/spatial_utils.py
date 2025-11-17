@@ -12,17 +12,16 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 
-
 # Direction angles (degrees, 0° = North, clockwise)
 DIRECTION_ANGLES = {
-    'N': 0,
-    'NE': 45,
-    'E': 90,
-    'SE': 135,
-    'S': 180,
-    'SW': 225,
-    'W': 270,
-    'NW': 315
+    "N": 0,
+    "NE": 45,
+    "E": 90,
+    "SE": 135,
+    "S": 180,
+    "SW": 225,
+    "W": 270,
+    "NW": 315
 }
 
 # Cone width for each direction (degrees)
@@ -41,32 +40,32 @@ def _load_state_centroids() -> Dict[str, Tuple[float, float]]:
     dict
         Mapping from FIPS code to (latitude, longitude) tuple
     """
-    if 'state' in _CENTROID_CACHE:
-        return _CENTROID_CACHE['state']
+    if "state" in _CENTROID_CACHE:
+        return _CENTROID_CACHE["state"]
 
     # Load the CSV file from package data
     try:
         # Python 3.9+
-        with resources.files('idmodels.data').joinpath('state_centroids.csv').open('r') as f:
-            df = pd.read_csv(f, dtype={'fips': str})
+        with resources.files("idmodels.data").joinpath("state_centroids.csv").open("r") as f:
+            df = pd.read_csv(f, dtype={"fips": str})
     except AttributeError:
         # Python 3.7-3.8 fallback
         import pkg_resources
-        csv_path = pkg_resources.resource_filename('idmodels', 'data/state_centroids.csv')
-        df = pd.read_csv(csv_path, dtype={'fips': str})
+        csv_path = pkg_resources.resource_filename("idmodels", "data/state_centroids.csv")
+        df = pd.read_csv(csv_path, dtype={"fips": str})
 
     # Convert to dictionary
     centroids = {}
     for _, row in df.iterrows():
-        centroids[row['fips']] = (row['latitude'], row['longitude'])
+        centroids[row["fips"]] = (row["latitude"], row["longitude"])
 
     # Cache the result
-    _CENTROID_CACHE['state'] = centroids
+    _CENTROID_CACHE["state"] = centroids
 
     return centroids
 
 
-def get_location_centroids(agg_level: str = 'state') -> Dict[str, Tuple[float, float]]:
+def get_location_centroids(agg_level: str = "state") -> Dict[str, Tuple[float, float]]:
     """
     Get location centroids for a given aggregation level.
 
@@ -93,7 +92,7 @@ def get_location_centroids(agg_level: str = 'state') -> Dict[str, Tuple[float, f
     Data is loaded from `idmodels/data/{agg_level}_centroids.csv` and cached
     for subsequent calls. See `idmodels/data/README.md` for data sources.
     """
-    if agg_level == 'state':
+    if agg_level == "state":
         return _load_state_centroids().copy()
     else:
         raise ValueError(
@@ -280,7 +279,7 @@ def validate_wave_directions(wave_directions: List[str]) -> None:
             )
 
     # Check for opposite direction pairs (potential multicollinearity warning)
-    opposite_pairs = [('N', 'S'), ('E', 'W'), ('NE', 'SW'), ('NW', 'SE')]
+    opposite_pairs = [("N", "S"), ("E", "W"), ("NE", "SW"), ("NW", "SE")]
     wave_set = set(wave_directions)
 
     for dir1, dir2 in opposite_pairs:

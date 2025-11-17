@@ -1,6 +1,5 @@
 """Unit tests for spatial_utils module."""
 
-import math
 import warnings
 
 import pytest
@@ -17,15 +16,15 @@ from idmodels.spatial_utils import (
 
 def test_get_location_centroids_state():
     """Test that state centroids are returned correctly."""
-    coords = get_location_centroids(agg_level='state')
+    coords = get_location_centroids(agg_level="state")
 
     # Should have all 50 states + DC + PR + US
     assert len(coords) >= 50
 
     # Check specific states exist
-    assert '06' in coords  # California
-    assert '36' in coords  # New York
-    assert 'US' in coords  # National
+    assert "06" in coords  # California
+    assert "36" in coords  # New York
+    assert "US" in coords  # National
 
     # Check coordinates are tuples of (lat, lon)
     for loc_code, coord in coords.items():
@@ -39,7 +38,7 @@ def test_get_location_centroids_state():
 def test_get_location_centroids_unsupported():
     """Test that unsupported aggregation levels raise ValueError."""
     with pytest.raises(ValueError, match="not supported"):
-        get_location_centroids(agg_level='county')
+        get_location_centroids(agg_level="county")
 
 
 def test_haversine_distance_same_point():
@@ -137,72 +136,72 @@ def test_get_directional_neighbors_north():
     """Test finding neighbors to the north."""
     # Create simple test coordinates
     coords = {
-        'origin': (40.0, -75.0),
-        'north1': (42.0, -75.0),  # Due north
-        'north2': (41.5, -74.8),  # North-ish
-        'south': (38.0, -75.0),   # Due south (should not be included)
-        'east': (40.0, -73.0),    # Due east (should not be included)
+        "origin": (40.0, -75.0),
+        "north1": (42.0, -75.0),  # Due north
+        "north2": (41.5, -74.8),  # North-ish
+        "south": (38.0, -75.0),   # Due south (should not be included)
+        "east": (40.0, -73.0),    # Due east (should not be included)
     }
 
     neighbors = get_directional_neighbors(
-        origin_loc='origin',
-        origin_coord=coords['origin'],
+        origin_loc="origin",
+        origin_coord=coords["origin"],
         all_coords=coords,
-        direction='N',
+        direction="N",
         max_distance_km=1000
     )
 
     # Should find neighbors to the north
     neighbor_locs = [loc for loc, _ in neighbors]
-    assert 'north1' in neighbor_locs
-    assert 'south' not in neighbor_locs
-    assert 'east' not in neighbor_locs
+    assert "north1" in neighbor_locs
+    assert "south" not in neighbor_locs
+    assert "east" not in neighbor_locs
 
 
 def test_get_directional_neighbors_max_distance():
     """Test that max_distance_km filters out distant neighbors."""
     coords = {
-        'origin': (40.0, -75.0),
-        'close': (40.1, -75.0),  # Very close (~11 km)
-        'far': (45.0, -75.0),    # Far away (~550 km)
+        "origin": (40.0, -75.0),
+        "close": (40.1, -75.0),  # Very close (~11 km)
+        "far": (45.0, -75.0),    # Far away (~550 km)
     }
 
     # With large max distance, should find both
     neighbors_large = get_directional_neighbors(
-        origin_loc='origin',
-        origin_coord=coords['origin'],
+        origin_loc="origin",
+        origin_coord=coords["origin"],
         all_coords=coords,
-        direction='N',
+        direction="N",
         max_distance_km=1000
     )
     assert len(neighbors_large) == 2
 
     # With small max distance, should only find close one
     neighbors_small = get_directional_neighbors(
-        origin_loc='origin',
-        origin_coord=coords['origin'],
+        origin_loc="origin",
+        origin_coord=coords["origin"],
         all_coords=coords,
-        direction='N',
+        direction="N",
         max_distance_km=100
     )
     assert len(neighbors_small) == 1
-    assert neighbors_small[0][0] == 'close'
+    assert neighbors_small[0][0] == "close"
 
 
 def test_get_directional_neighbors_sorted_by_distance():
     """Test that neighbors are sorted by distance (nearest first)."""
     coords = {
-        'origin': (40.0, -75.0),
-        'close': (40.5, -75.0),
-        'medium': (41.0, -75.0),
-        'far': (42.0, -75.0),
+        "origin": (40.0, -75.0),
+        "close": (40.5, -75.0),
+        "medium": (41.0, -75.0),
+        "far": (42.0, -75.0),
     }
 
     neighbors = get_directional_neighbors(
-        origin_loc='origin',
-        origin_coord=coords['origin'],
+        origin_loc="origin",
+        origin_coord=coords["origin"],
         all_coords=coords,
-        direction='N',
+        direction="N",
         max_distance_km=1000
     )
 
@@ -215,14 +214,14 @@ def test_get_directional_neighbors_sorted_by_distance():
 
 def test_get_directional_neighbors_invalid_direction():
     """Test that invalid direction raises ValueError."""
-    coords = {'origin': (40.0, -75.0)}
+    coords = {"origin": (40.0, -75.0)}
 
     with pytest.raises(ValueError, match="Invalid direction"):
         get_directional_neighbors(
-            origin_loc='origin',
-            origin_coord=coords['origin'],
+            origin_loc="origin",
+            origin_coord=coords["origin"],
             all_coords=coords,
-            direction='INVALID',
+            direction="INVALID",
             max_distance_km=1000
         )
 
@@ -230,22 +229,22 @@ def test_get_directional_neighbors_invalid_direction():
 def test_validate_wave_directions_valid():
     """Test validation with valid directions."""
     # Should not raise
-    validate_wave_directions(['N', 'S', 'E', 'W'])
-    validate_wave_directions(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
-    validate_wave_directions(['NE', 'SW'])
+    validate_wave_directions(["N", "S", "E", "W"])
+    validate_wave_directions(["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
+    validate_wave_directions(["NE", "SW"])
 
 
 def test_validate_wave_directions_invalid():
     """Test validation with invalid directions."""
     with pytest.raises(ValueError, match="Invalid direction"):
-        validate_wave_directions(['N', 'INVALID', 'S'])
+        validate_wave_directions(["N", "INVALID", "S"])
 
 
 def test_validate_wave_directions_opposite_warning():
     """Test that opposite directions trigger a warning."""
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        validate_wave_directions(['N', 'S'])
+        validate_wave_directions(["N", "S"])
 
         # Should have generated a warning about opposite directions
         assert len(w) >= 1
@@ -254,48 +253,48 @@ def test_validate_wave_directions_opposite_warning():
 
 def test_direction_angles_coverage():
     """Test that all 8 directions are defined."""
-    expected_directions = {'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'}
+    expected_directions = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"}
     assert set(DIRECTION_ANGLES.keys()) == expected_directions
 
 
 def test_direction_angles_values():
     """Test that direction angles are correct."""
-    assert DIRECTION_ANGLES['N'] == 0
-    assert DIRECTION_ANGLES['NE'] == 45
-    assert DIRECTION_ANGLES['E'] == 90
-    assert DIRECTION_ANGLES['SE'] == 135
-    assert DIRECTION_ANGLES['S'] == 180
-    assert DIRECTION_ANGLES['SW'] == 225
-    assert DIRECTION_ANGLES['W'] == 270
-    assert DIRECTION_ANGLES['NW'] == 315
+    assert DIRECTION_ANGLES["N"] == 0
+    assert DIRECTION_ANGLES["NE"] == 45
+    assert DIRECTION_ANGLES["E"] == 90
+    assert DIRECTION_ANGLES["SE"] == 135
+    assert DIRECTION_ANGLES["S"] == 180
+    assert DIRECTION_ANGLES["SW"] == 225
+    assert DIRECTION_ANGLES["W"] == 270
+    assert DIRECTION_ANGLES["NW"] == 315
 
 
 def test_get_directional_neighbors_with_real_states():
     """Test directional neighbors using real state centroids."""
-    coords = get_location_centroids('state')
+    coords = get_location_centroids("state")
 
     # Pennsylvania (42) should have neighbors in all directions
-    pa_coord = coords['42']
+    pa_coord = coords["42"]
 
     # Check NE direction - should include NY (36)
     # NY is actually northeast of PA (bearing ~38°), not due north
     ne_neighbors = get_directional_neighbors(
-        origin_loc='42',
+        origin_loc="42",
         origin_coord=pa_coord,
         all_coords=coords,
-        direction='NE',
+        direction="NE",
         max_distance_km=500
     )
 
     ne_locs = [loc for loc, _ in ne_neighbors]
-    assert '36' in ne_locs  # New York is northeast of Pennsylvania
+    assert "36" in ne_locs  # New York is northeast of Pennsylvania
 
     # Check South direction - should include MD (24) or WV (54)
     south_neighbors = get_directional_neighbors(
-        origin_loc='42',
+        origin_loc="42",
         origin_coord=pa_coord,
         all_coords=coords,
-        direction='S',
+        direction="S",
         max_distance_km=500
     )
 
@@ -303,4 +302,4 @@ def test_get_directional_neighbors_with_real_states():
     # At least one southern neighbor
     assert len(south_locs) > 0
     # NY should not be in south neighbors
-    assert '36' not in south_locs
+    assert "36" not in south_locs

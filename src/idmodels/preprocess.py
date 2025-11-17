@@ -5,11 +5,7 @@ import pandas as pd
 from iddata.utils import get_holidays
 from timeseriesutils import featurize
 
-from idmodels.spatial_utils import (
-    get_location_centroids,
-    get_directional_neighbors,
-    validate_wave_directions
-)
+from idmodels.spatial_utils import get_directional_neighbors, get_location_centroids, validate_wave_directions
 
 
 def create_features_and_targets(df, incl_level_feats, max_horizon, curr_feat_names = []):
@@ -175,21 +171,21 @@ def create_directional_wave_features(df, wave_config=None):
     - Features are computed per location and time point
     """
     # Return early if not enabled
-    if wave_config is None or not wave_config.get('enabled', False):
+    if wave_config is None or not wave_config.get("enabled", False):
         return df, []
 
     # Extract configuration with defaults
-    directions = wave_config.get('directions', ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
-    temporal_lags = wave_config.get('temporal_lags', [1, 2])
-    max_distance_km = wave_config.get('max_distance_km', 1000)
-    include_velocity = wave_config.get('include_velocity', False)
-    include_aggregate = wave_config.get('include_aggregate', True)
+    directions = wave_config.get("directions", ["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
+    temporal_lags = wave_config.get("temporal_lags", [1, 2])
+    max_distance_km = wave_config.get("max_distance_km", 1000)
+    include_velocity = wave_config.get("include_velocity", False)
+    include_aggregate = wave_config.get("include_aggregate", True)
 
     # Validate directions
     validate_wave_directions(directions)
 
     # Get aggregation level(s) from dataframe
-    agg_levels = df['agg_level'].unique()
+    agg_levels = df["agg_level"].unique()
     if len(agg_levels) > 1:
         raise ValueError(
             f"Multiple aggregation levels found: {agg_levels}. "
@@ -206,7 +202,7 @@ def create_directional_wave_features(df, wave_config=None):
         )
 
     # Filter to locations present in both data and coordinate lookup
-    locations_in_df = set(df['location'].unique())
+    locations_in_df = set(df["location"].unique())
     locations_with_coords = set(location_coords.keys())
     locations_to_use = locations_in_df.intersection(locations_with_coords)
 
@@ -251,16 +247,16 @@ def create_directional_wave_features(df, wave_config=None):
     wave_features = {}
 
     # Sort dataframe by location and date for efficient processing
-    df_sorted = df.sort_values(['location', 'wk_end_date']).reset_index(drop=True)
+    df_sorted = df.sort_values(["location", "wk_end_date"]).reset_index(drop=True)
 
     # Compute base directional features (at time t)
     for direction in directions:
-        feat_name = f'inc_trans_cs_wave_{direction}'
+        feat_name = f"inc_trans_cs_wave_{direction}"
         feat_values = []
 
         for idx, row in df_sorted.iterrows():
-            loc = row['location']
-            date = row['wk_end_date']
+            loc = row["location"]
+            date = row["wk_end_date"]
 
             # Get neighbors in this direction
             neighbors = neighbor_cache[loc][direction]
@@ -277,9 +273,9 @@ def create_directional_wave_features(df, wave_config=None):
             for neighbor_loc, distance in neighbors:
                 # Get neighbor's inc_trans_cs at same time point
                 neighbor_value = df_sorted[
-                    (df_sorted['location'] == neighbor_loc) &
-                    (df_sorted['wk_end_date'] == date)
-                ]['inc_trans_cs']
+                    (df_sorted["location"] == neighbor_loc) &
+                    (df_sorted["wk_end_date"] == date)
+                ]["inc_trans_cs"]
 
                 if len(neighbor_value) > 0 and not pd.isna(neighbor_value.iloc[0]):
                     # Inverse distance weighting
@@ -296,12 +292,12 @@ def create_directional_wave_features(df, wave_config=None):
 
     # Compute aggregate feature (overall weighted average)
     if include_aggregate:
-        feat_name = 'inc_trans_cs_wave_avg'
+        feat_name = "inc_trans_cs_wave_avg"
         feat_values = []
 
         for idx, row in df_sorted.iterrows():
-            loc = row['location']
-            date = row['wk_end_date']
+            loc = row["location"]
+            date = row["wk_end_date"]
 
             neighbors = all_neighbor_cache[loc]
 
@@ -315,9 +311,9 @@ def create_directional_wave_features(df, wave_config=None):
 
             for neighbor_loc, distance in neighbors:
                 neighbor_value = df_sorted[
-                    (df_sorted['location'] == neighbor_loc) &
-                    (df_sorted['wk_end_date'] == date)
-                ]['inc_trans_cs']
+                    (df_sorted["location"] == neighbor_loc) &
+                    (df_sorted["wk_end_date"] == date)
+                ]["inc_trans_cs"]
 
                 if len(neighbor_value) > 0 and not pd.isna(neighbor_value.iloc[0]):
                     weight = 1.0 / distance if distance > 0 else 1.0
@@ -341,9 +337,9 @@ def create_directional_wave_features(df, wave_config=None):
 
     for feat_name in base_feat_names:
         for lag in temporal_lags:
-            lagged_feat_name = f'{feat_name}_lag{lag}'
+            lagged_feat_name = f"{feat_name}_lag{lag}"
             # Use groupby to create lags within each location
-            df_sorted[lagged_feat_name] = df_sorted.groupby('location')[feat_name].shift(lag)
+            df_sorted[lagged_feat_name] = df_sorted.groupby("location")[feat_name].shift(lag)
             lagged_features[lagged_feat_name] = None  # Just track the name
 
     # Create velocity features (rate of change)
@@ -351,12 +347,12 @@ def create_directional_wave_features(df, wave_config=None):
         velocity_features = {}
         for feat_name in base_feat_names:
             # Velocity = current - lag1
-            lag1_name = f'{feat_name}_lag1'
+            lag1_name = f"{feat_name}_lag1"
             if lag1_name in df_sorted.columns or 1 in temporal_lags:
-                velocity_feat_name = f'{feat_name}_velocity'
+                velocity_feat_name = f"{feat_name}_velocity"
                 if lag1_name not in df_sorted.columns:
                     # Need to create lag1 if it doesn't exist
-                    df_sorted[lag1_name] = df_sorted.groupby('location')[feat_name].shift(1)
+                    df_sorted[lag1_name] = df_sorted.groupby("location")[feat_name].shift(1)
                 df_sorted[velocity_feat_name] = df_sorted[feat_name] - df_sorted[lag1_name]
                 velocity_features[velocity_feat_name] = None
 
