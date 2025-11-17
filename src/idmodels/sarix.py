@@ -14,7 +14,15 @@ class SARIXModel():
 
     def _get_extra_sarix_params(self, df):
         """Return extra parameters to pass to SARIX constructor. Returns empty dict by default."""
-        return {}
+        extra_params = {}
+
+        # Add innovation distribution parameters if specified
+        if hasattr(self.model_config, 'innovation_dist'):
+            extra_params['innovation_dist'] = self.model_config.innovation_dist
+        if hasattr(self.model_config, 'innovation_df_prior_scale'):
+            extra_params['innovation_df_prior_scale'] = self.model_config.innovation_df_prior_scale
+
+        return extra_params
 
     def run(self, run_config):
         fdl = DiseaseDataLoader()
@@ -118,15 +126,21 @@ class SARIXFourierModel(SARIXModel):
     """
     def _get_extra_sarix_params(self, df):
         """Return Fourier-specific parameters for SARIX constructor."""
+        # Get base parameters (includes innovation_dist if specified)
+        extra_params = super()._get_extra_sarix_params(df)
+
         # Extract day-of-year from dates for Fourier features
         # Take the first location's dates (same for all locations after reshaping)
         day_of_year = df.groupby("location")["wk_end_date"].apply(lambda x: x.dt.dayofyear.values).iloc[0]
 
-        return {
+        # Add Fourier-specific parameters
+        extra_params.update({
             "day_of_year": day_of_year,
             "fourier_K": self.model_config.fourier_K,
             "fourier_pooling": self.model_config.fourier_pooling
-        }
+        })
+
+        return extra_params
 
 
 def _np_percentile(predictions, q_levels, axis):
