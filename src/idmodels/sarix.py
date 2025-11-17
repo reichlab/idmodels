@@ -17,10 +17,10 @@ class SARIXModel():
         extra_params = {}
 
         # Add innovation distribution parameters if specified
-        if hasattr(self.model_config, 'innovation_dist'):
-            extra_params['innovation_dist'] = self.model_config.innovation_dist
-        if hasattr(self.model_config, 'innovation_df_prior_scale'):
-            extra_params['innovation_df_prior_scale'] = self.model_config.innovation_df_prior_scale
+        if hasattr(self.model_config, "innovation_dist"):
+            extra_params["innovation_dist"] = self.model_config.innovation_dist
+        if hasattr(self.model_config, "innovation_df_prior_scale"):
+            extra_params["innovation_df_prior_scale"] = self.model_config.innovation_df_prior_scale
 
         return extra_params
 
