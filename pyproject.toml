@@ -28,11 +28,6 @@ dev = [
     "pytest",
     "ruff"
 ]
-examples = [
-    "jupyter",
-    "matplotlib",
-    "plotly"
-]
 
 [project.urls]
 Repository = "https://github.com/reichlab/idmodels.git"
