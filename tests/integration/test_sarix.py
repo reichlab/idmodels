@@ -65,7 +65,7 @@ def test_sarix_nhsn(tmp_path):
     ["1", "25", "99"])
 ])
 def test_sarix_nssp(tmp_path, fips_codes, nci_ids):
-    date = datetime.date.fromisoformat("2025-09-27")
+    date = datetime.date.fromisoformat("2025-09-20")
     model_config = create_test_sarix_model_config(main_source=["nssp"], theta_pooling="shared", sigma_pooling="none")
     run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=nci_ids, num=200, tmp_path=tmp_path)
     

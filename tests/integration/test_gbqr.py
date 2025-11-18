@@ -63,7 +63,7 @@ def test_gbqr_nhsn(tmp_path):
     ["1", "25", "99"])
 ])
 def test_gbqr_nssp(tmp_path, fips_codes, nci_ids):
-    date = datetime.date.fromisoformat("2025-09-27")
+    date = datetime.date.fromisoformat("2025-09-20")
     model_config = create_test_gbqr_model_config(sources=["nssp"])
     run_config = create_test_gbqr_run_config(ref_date=date, states=fips_codes, hsas=nci_ids, tmp_path=tmp_path)
 
