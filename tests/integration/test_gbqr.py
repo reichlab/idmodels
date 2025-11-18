@@ -1,5 +1,4 @@
 import datetime
-import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -7,6 +6,7 @@ from unittest.mock import patch
 import lightgbm
 import numpy
 import pandas as pd
+import pytest
 from pandas.testing import assert_frame_equal
 
 from idmodels.gbqr import GBQRModel
