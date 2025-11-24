@@ -58,6 +58,7 @@ class SARIXModel():
         .assign(delta_xmas = lambda x: x["season_week"] - x["xmas_week"])
         df["xmas_spike"] = np.maximum(3 - np.abs(df["delta_xmas"]), 0)
    
+        # missing values are interpolated when possible
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
         unique_locations = len(df_states["location"].unique()) + len(df_hsas["location"].unique())
