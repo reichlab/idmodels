@@ -62,9 +62,6 @@ class SARIXModel():
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
         unique_locations = len(run_config.states) + len(run_config.hsas)
         batched_xy = df[xy_colnames].values.reshape(unique_locations, -1, len(xy_colnames))
-        
-        df = df.query("wk_end_date >= '2022-10-01'").interpolate()
-        batched_xy = df[xy_colnames].values.reshape(len(df["location"].unique()), -1, len(xy_colnames))
 
         # Get any extra parameters for the SARIX constructor
         extra_params = self._get_extra_sarix_params(df)
