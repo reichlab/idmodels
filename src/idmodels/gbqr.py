@@ -31,15 +31,38 @@ class GBQRModel():
             ilinet_kwargs = {"scale_to_positive": False}
             flusurvnet_kwargs = {"burden_adj": False}
         
-        fdl = DiseaseDataLoader()
-        df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
-                           ilinet_kwargs=ilinet_kwargs,
-                           flusurvnet_kwargs=flusurvnet_kwargs,
-                           sources=self.model_config.sources,
-                           power_transform=self.model_config.power_transform)
-        if run_config.locations is not None:
-            df = df.loc[df["location"].isin(run_config.locations)]
+        valid_sources = ["flusurvnet", "nhsn", "ilinet", "nssp"]
+        if not np.isin(np.array(self.model_config.sources), valid_sources).all():
+          raise ValueError("For GBQR, the only supported data sources are 'nhsn', 'flusurvnet', 'ilinet', or 'nssp'.")
         
+        # Check if both nhsn and nssp data are included as sources
+        if all(src in self.model_config.sources for src in ["nhsn", "nssp"]):
+            raise ValueError("Only one of 'nhsn' or 'nssp' may be selected as a data source.")
+        
+        fdl = DiseaseDataLoader()
+        if "nhsn" in self.model_config.sources:
+            df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
+                               ilinet_kwargs=ilinet_kwargs,
+                               flusurvnet_kwargs=flusurvnet_kwargs,
+                               sources=self.model_config.sources,
+                               power_transform=self.model_config.power_transform)
+        elif "nssp" in self.model_config.sources:
+            df = fdl.load_data(nssp_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
+                               ilinet_kwargs=ilinet_kwargs,
+                               flusurvnet_kwargs=flusurvnet_kwargs,
+                               sources=self.model_config.sources,
+                               power_transform=self.model_config.power_transform)
+
+        if (run_config.states == []) & (run_config.hsas == []):
+            raise ValueError("User must request a non-empty set of locations to forecast for.")
+
+        if (run_config.states != []) & (run_config.hsas != []):
+            raise NotImplementedError("Functionality for simultaneously forecasting state- and hsa-level locations is not yet implemented.")
+        
+        df_states = df.loc[(df["location"].isin(run_config.states)) & (df["agg_level"] != "hsa")]
+        df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
+        df = pd.concat([df_states, df_hsas], join = "inner", axis = 0)
+
         # augment data with features and target values
         if run_config.disease == "flu":
             init_feats = ["inc_trans_cs", "season_week", "log_pop"]
@@ -146,7 +169,7 @@ class GBQRModel():
                         "inc_trans_cs", "horizon",
                         "inc_trans_center_factor", "inc_trans_scale_factor"]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
-        preds_df = preds_df.loc[(preds_df["source"] == "nhsn")]
+        preds_df = preds_df.loc[preds_df["source"].isin(["nhsn", "nssp"])]
         preds_df = pd.melt(preds_df,
                         id_vars=cols_to_keep,
                         var_name="quantile",
@@ -162,11 +185,20 @@ class GBQRModel():
         else:
             raise ValueError('unsupported power_transform: must be "4rt" or None')
         
-        preds_df["value"] = (np.maximum(preds_df["inc_trans_target_hat"], 0.0) ** inv_power - 0.01 - 0.75**4) * preds_df["pop"] / 100000
-        preds_df["value"] = np.maximum(preds_df["value"], 0.0)
+        preds_df["value"] = (np.maximum(preds_df["inc_trans_target_hat"], 0.0) ** inv_power - 0.01 - 0.75**4)
         
         # get predictions into the format needed for FluSight hub submission
-        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, run_config.disease)
+        if "nhsn" in preds_df["source"].unique():
+            # turn nhsn rates back into counts
+            preds_df["value"] = preds_df["value"] * preds_df["pop"] / 100000
+            target_name = "wk inc " + run_config.disease + " hosp"
+        elif "nssp" in preds_df["source"].unique():
+            preds_df["value"] = preds_df["value"] / 100 # percentage to proportion
+            preds_df["value"] = np.minimum(preds_df["value"], 1.0)
+            target_name = "wk inc " + run_config.disease + " prop ed visits"
+
+        preds_df["value"] = np.maximum(preds_df["value"], 0.0)
+        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, target_name)
         
         # sort quantiles to avoid quantile crossing
         preds_df = self._quantile_noncrossing(
@@ -261,7 +293,7 @@ class GBQRModel():
         return test_pred_qs_df
 
 
-    def _format_as_flusight_output(self, preds_df, ref_date, disease):
+    def _format_as_flusight_output(self, preds_df, ref_date, target_name):
         # keep just required columns and rename to match hub format
         preds_df = preds_df[["location", "wk_end_date", "horizon", "quantile", "value"]] \
             .rename(columns={"quantile": "output_type_id"})
@@ -269,7 +301,7 @@ class GBQRModel():
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")
         preds_df["reference_date"] = ref_date
         preds_df["horizon"] = (pd.to_timedelta(preds_df["target_end_date"].dt.date - ref_date).dt.days / 7).astype(int)
-        preds_df["target"] = "wk inc " + disease + " hosp"
+        preds_df["target"] = target_name
         
         preds_df["output_type"] = "quantile"
         preds_df.drop(columns="wk_end_date", inplace=True)
