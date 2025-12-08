@@ -56,12 +56,10 @@ class GBQRModel():
         if (run_config.states == []) & (run_config.hsas == []):
             raise ValueError("User must request a non-empty set of locations to forecast for.")
 
-        if (run_config.states != []) & (run_config.hsas != []):
-            raise NotImplementedError("Functionality for simultaneously forecasting state- and hsa-level locations is not yet implemented.")
-        
         df_states = df.loc[(df["location"].isin(run_config.states)) & (df["agg_level"] != "hsa")]
         df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
         df = pd.concat([df_states, df_hsas], join = "inner", axis = 0)
+        df["unique_id"] = df["agg_level"] + df["location"]
 
         # augment data with features and target values
         if run_config.disease == "flu":
@@ -88,12 +86,12 @@ class GBQRModel():
         
         # train model and obtain test set predictinos
         if self.model_config.fit_locations_separately:
-            locations = df_test["location"].unique()
+            unique_ids = df_test["unique_id"].unique()
             preds_df = [
                 self._train_gbq_and_predict(
                     run_config,
                     df_train, df_test, feat_names, location
-                ) for location in locations
+                ) for location in unique_ids
             ]
             preds_df = pd.concat(preds_df, axis=0)
         else:
@@ -101,7 +99,7 @@ class GBQRModel():
                 run_config,
                 df_train, df_test, feat_names
             )
-        
+
         # save
         save_path = build_save_path(
             root=run_config.output_root,
@@ -152,7 +150,7 @@ class GBQRModel():
         
         # melt to get columns into rows, keeping only the things we need to invert data
         # transforms later on
-        cols_to_keep = ["source", "location", "wk_end_date", "pop",
+        cols_to_keep = ["source", "agg_level", "location", "wk_end_date", "pop",
                         "inc_trans_cs", "horizon",
                         "inc_trans_center_factor", "inc_trans_scale_factor"]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
@@ -190,8 +188,8 @@ class GBQRModel():
         # sort quantiles to avoid quantile crossing
         preds_df = self._quantile_noncrossing(
             preds_df,
-            gcols = ["location", "reference_date", "horizon", "target_end_date",
-                    "target", "output_type"]
+            gcols = ["agg_level", "location", "reference_date", "horizon",
+                     "target_end_date", "target", "output_type"]
         )
         
         return preds_df
@@ -282,7 +280,7 @@ class GBQRModel():
 
     def _format_as_flusight_output(self, preds_df, ref_date, target_name):
         # keep just required columns and rename to match hub format
-        preds_df = preds_df[["location", "wk_end_date", "horizon", "quantile", "value"]] \
+        preds_df = preds_df[["agg_level", "location", "wk_end_date", "horizon", "quantile", "value"]] \
             .rename(columns={"quantile": "output_type_id"})
         
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")

@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 from iddata.loader import DiseaseDataLoader
@@ -40,12 +39,10 @@ class SARIXModel():
         if (run_config.states == []) & (run_config.hsas == []):
             raise ValueError("User must request a non-empty set of locations to forecast for.")
 
-        if (run_config.states != []) & (run_config.hsas != []):
-            raise NotImplementedError("Functionality for simultaneously forecasting state- and hsa-level locations is not yet implemented.")
-        
         df_states = df.loc[(df["location"].isin(run_config.states)) & (df["agg_level"] != "hsa")]
         df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
         df = pd.concat([df_states, df_hsas], join = "inner", axis = 0)
+        df["unique_id"] = df["agg_level"] + df["location"]
 
         # season week relative to christmas
         df = df.merge(
@@ -61,8 +58,7 @@ class SARIXModel():
         # missing values are interpolated when possible
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
-        unique_locations = len(df_states["location"].unique()) + len(df_hsas["location"].unique())
-        batched_xy = df[xy_colnames].values.reshape(unique_locations, -1, len(xy_colnames))
+        batched_xy = df[xy_colnames].values.reshape(len(df["unique_id"].unique()), -1, len(xy_colnames))
 
         # Get any extra parameters for the SARIX constructor
         extra_params = self._get_extra_sarix_params(df)
@@ -87,18 +83,18 @@ class SARIXModel():
         pred_qs = _np_percentile(sarix_fit_all_locs_theta_pooled.predictions[..., :, :, 0],
                                  np.array(run_config.q_levels) * 100, axis=0)
         
-        df_data_last_obs = df.groupby(["location", "agg_level"]).tail(1)
+        df_data_last_obs = df.groupby(["unique_id", "agg_level"]).tail(1)
         
         preds_df = pd.concat([
             pd.DataFrame(pred_qs[i, :, :]) \
-            .set_axis(df_data_last_obs["location"], axis="index") \
+            .set_axis(df_data_last_obs["unique_id"], axis="index") \
             .set_axis(np.arange(1, run_config.max_horizon+1), axis="columns") \
             .assign(output_type_id = q_label) \
             for i, q_label in enumerate(run_config.q_labels)
         ]) \
         .reset_index() \
-        .melt(["location", "output_type_id"], var_name="horizon") \
-        .merge(df_data_last_obs, on="location", how="left")
+        .melt(["unique_id", "output_type_id"], var_name="horizon") \
+        .merge(df_data_last_obs, on="unique_id", how="left")
         
         # build data frame with predictions on the original scale
         preds_df["value"] = (preds_df["value"] + preds_df["inc_trans_center_factor"]) * preds_df["inc_trans_scale_factor"]
@@ -119,7 +115,7 @@ class SARIXModel():
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
         
         # keep just required columns and rename to match hub format
-        preds_df = preds_df[["location", "wk_end_date", "horizon", "output_type_id", "value"]]
+        preds_df = preds_df[["agg_level", "location", "wk_end_date", "horizon", "output_type_id", "value"]]
         
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")
         preds_df["reference_date"] = run_config.ref_date
