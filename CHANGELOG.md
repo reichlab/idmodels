@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Optional "examples" dependencies (jupyter, matplotlib, plotly)
 
+## [1.0.0] - 2025-11-24
+
+### Added
+- NSSP data source support for SARIX and GBQR models
+- HSA (Hospital Service Area) level forecasting support
+- State-level forecasting for NSSP data
+
+### Changed
+- **Breaking**: `run_config.locations` superseded by `run_config.states` and `run_config.hsas`
+- NSSP predictions restricted to [0, 1] range for proportion data
+- Updated test infrastructure with config creation helpers
+
 ## [0.1.0] - 2025-11-03
 
 ### Added
@@ -59,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated to latest iddata API
 
-[Unreleased]: https://github.com/reichlab/idmodels/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/reichlab/idmodels/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/reichlab/idmodels/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/reichlab/idmodels/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/reichlab/idmodels/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/reichlab/idmodels/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/reichlab/idmodels/releases/tag/v0.0.1

@@ -60,3 +60,6 @@ quote-style = "double"
 
 [tool.setuptools.dynamic]
 version = {attr = "idmodels.__version__"}
+
+[tool.codespell]
+ignore-words-list = "hsa"
