@@ -42,8 +42,11 @@ testpaths = [
     "tests",
 ]
 
-[tools.setuptools]
-packages = ["idmodels"]
+[tool.setuptools]
+packages = {find = {where = ["src"]}}
+
+[tool.setuptools.package-data]
+idmodels = ["data/*.csv", "data/*.md"]
 
 [tool.ruff]
 line-length = 120
@@ -57,3 +60,6 @@ quote-style = "double"
 
 [tool.setuptools.dynamic]
 version = {attr = "idmodels.__version__"}
+
+[tool.codespell]
+ignore-words-list = "hsa"

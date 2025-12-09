@@ -6,7 +6,7 @@ import pandas as pd
 from iddata.loader import DiseaseDataLoader
 from tqdm.autonotebook import tqdm
 
-from idmodels.preprocess import create_features_and_targets
+from idmodels.preprocess import create_directional_wave_features, create_features_and_targets
 from idmodels.utils import build_save_path
 
 
@@ -68,7 +68,20 @@ class GBQRModel():
             init_feats = ["inc_trans_cs", "season_week", "log_pop"]
         elif run_config.disease == "covid":
             init_feats = ["inc_trans_cs", "log_pop"]
-        
+
+        # Create directional wave features if enabled
+        if hasattr(self.model_config, "use_directional_waves") and self.model_config.use_directional_waves:
+            wave_config = {
+                "enabled": True,
+                "directions": getattr(self.model_config, "wave_directions", ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]),
+                "temporal_lags": getattr(self.model_config, "wave_temporal_lags", [1, 2]),
+                "max_distance_km": getattr(self.model_config, "wave_max_distance_km", 1000),
+                "include_velocity": getattr(self.model_config, "wave_include_velocity", False),
+                "include_aggregate": getattr(self.model_config, "wave_include_aggregate", True)
+            }
+            df, wave_feat_names = create_directional_wave_features(df, wave_config)
+            init_feats = init_feats + wave_feat_names
+
         df, feat_names = create_features_and_targets(
             df = df,
             incl_level_feats=self.model_config.incl_level_feats,

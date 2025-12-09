@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2025-12-08
+
+### Added
+- Directional wave features for spatial-temporal disease modeling in GBQR
+- Spatial utilities module (`spatial_utils.py`) with location centroids for US states
+- State centroids data file (`state_centroids.csv`) with geographic coordinates for all 50 US states, DC, and territories
+- Data directory README documenting available data files
+- Haversine distance and bearing calculations for spatial analysis
+- `create_directional_wave_features()` function in preprocessing pipeline
+- Configuration options for directional wave features (disabled by default for backwards compatibility)
+- Comprehensive test suite: 20 unit tests for spatial utilities, 14 for feature generation, 7 integration tests
+- Documentation for directional wave features implementation
+
+### Removed
+- Optional "examples" dependencies (jupyter, matplotlib, plotly)
+
+## [1.0.0] - 2025-11-24
+
+### Added
+- NSSP data source support for SARIX and GBQR models
+- HSA (Hospital Service Area) level forecasting support
+- State-level forecasting for NSSP data
+
+### Changed
+- **Breaking**: `run_config.locations` superseded by `run_config.states` and `run_config.hsas`
+- NSSP predictions restricted to [0, 1] range for proportion data
+- Updated test infrastructure with config creation helpers
+
 ## [0.1.0] - 2025-11-03
 
 ### Added
@@ -43,6 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated to latest iddata API
 
-[Unreleased]: https://github.com/reichlab/idmodels/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/reichlab/idmodels/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/reichlab/idmodels/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/reichlab/idmodels/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/reichlab/idmodels/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/reichlab/idmodels/releases/tag/v0.0.1
