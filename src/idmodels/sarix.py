@@ -115,7 +115,12 @@ class SARIXModel():
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
         
         # keep just required columns and rename to match hub format
-        preds_df = preds_df[["agg_level", "location", "wk_end_date", "horizon", "output_type_id", "value"]]
+        req_cols = ["location", "wk_end_date", "horizon", "output_type_id", "value"]
+        
+        if "prop ed visits" in target_name:
+            req_cols.insert(0, "agg_level")
+        
+        preds_df = preds_df[req_cols]
         
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")
         preds_df["reference_date"] = run_config.ref_date

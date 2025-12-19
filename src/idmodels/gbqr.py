@@ -114,6 +114,7 @@ class GBQRModel():
             )
         
         # save
+        print(preds_df)
         save_path = build_save_path(
             root=run_config.output_root,
             run_config=run_config,
@@ -190,20 +191,20 @@ class GBQRModel():
             # turn nhsn rates back into counts
             preds_df["value"] = preds_df["value"] * preds_df["pop"] / 100000
             target_name = "wk inc " + run_config.disease + " hosp"
+            gcols = ["location", "reference_date", "horizon",
+                     "target_end_date", "target", "output_type"]
         elif "nssp" in preds_df["source"].unique():
             preds_df["value"] = preds_df["value"] / 100 # percentage to proportion
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
             target_name = "wk inc " + run_config.disease + " prop ed visits"
+            gcols = ["agg_level", "location", "reference_date", "horizon",
+                     "target_end_date", "target", "output_type"]
 
         preds_df["value"] = np.maximum(preds_df["value"], 0.0)
         preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, target_name)
         
         # sort quantiles to avoid quantile crossing
-        preds_df = self._quantile_noncrossing(
-            preds_df,
-            gcols = ["agg_level", "location", "reference_date", "horizon",
-                     "target_end_date","target", "output_type"]
-        )
+        preds_df = self._quantile_noncrossing(preds_df, gcols = gcols)
         
         return preds_df
 
@@ -293,7 +294,12 @@ class GBQRModel():
 
     def _format_as_flusight_output(self, preds_df, ref_date, target_name):
         # keep just required columns and rename to match hub format
-        preds_df = preds_df[["agg_level", "location", "wk_end_date", "horizon", "quantile", "value"]] \
+        req_cols = ["location", "wk_end_date", "horizon", "quantile", "value"]
+        
+        if "prop ed visits" in target_name:
+            req_cols.insert(0, "agg_level")
+        
+        preds_df = preds_df[req_cols] \
             .rename(columns={"quantile": "output_type_id"})
         
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")
