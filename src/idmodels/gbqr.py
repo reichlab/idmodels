@@ -114,7 +114,6 @@ class GBQRModel():
             )
         
         # save
-        print(preds_df)
         save_path = build_save_path(
             root=run_config.output_root,
             run_config=run_config,
