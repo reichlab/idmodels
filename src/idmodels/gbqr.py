@@ -56,12 +56,10 @@ class GBQRModel():
         if (run_config.states == []) & (run_config.hsas == []):
             raise ValueError("User must request a non-empty set of locations to forecast for.")
 
-        if (run_config.states != []) & (run_config.hsas != []):
-            raise NotImplementedError("Functionality for simultaneously forecasting state- and hsa-level locations is not yet implemented.")
-        
         df_states = df.loc[(df["location"].isin(run_config.states)) & (df["agg_level"] != "hsa")]
         df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
         df = pd.concat([df_states, df_hsas], join = "inner", axis = 0)
+        df["unique_id"] = df["agg_level"] + df["location"]
 
         # augment data with features and target values
         if run_config.disease == "flu":
@@ -101,12 +99,12 @@ class GBQRModel():
         
         # train model and obtain test set predictinos
         if self.model_config.fit_locations_separately:
-            locations = df_test["location"].unique()
+            unique_ids = df_test["unique_id"].unique()
             preds_df = [
                 self._train_gbq_and_predict(
                     run_config,
                     df_train, df_test, feat_names, location
-                ) for location in locations
+                ) for location in unique_ids
             ]
             preds_df = pd.concat(preds_df, axis=0)
         else:
@@ -165,7 +163,7 @@ class GBQRModel():
         
         # melt to get columns into rows, keeping only the things we need to invert data
         # transforms later on
-        cols_to_keep = ["source", "location", "wk_end_date", "pop",
+        cols_to_keep = ["source", "agg_level", "location", "wk_end_date", "pop",
                         "inc_trans_cs", "horizon",
                         "inc_trans_center_factor", "inc_trans_scale_factor"]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
@@ -197,15 +195,19 @@ class GBQRModel():
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
             target_name = "wk inc " + run_config.disease + " prop ed visits"
 
+        keep_agg_levels = False
+        gcols = ["location", "reference_date", "horizon", "target_end_date", "target", "output_type"]
+        # we count national as state since it is coded using the same 2-digit fips code
+        preds_df["geo_level"] = np.where(preds_df["agg_level"] == "national", "state", preds_df["agg_level"])
+        if len(preds_df["geo_level"].unique()) > 1:
+            keep_agg_levels = True
+            gcols.insert(0, "agg_level")
+
         preds_df["value"] = np.maximum(preds_df["value"], 0.0)
-        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, target_name)
+        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, target_name, keep_agg_levels)
         
         # sort quantiles to avoid quantile crossing
-        preds_df = self._quantile_noncrossing(
-            preds_df,
-            gcols = ["location", "reference_date", "horizon", "target_end_date",
-                    "target", "output_type"]
-        )
+        preds_df = self._quantile_noncrossing(preds_df, gcols = gcols)
         
         return preds_df
 
@@ -293,9 +295,14 @@ class GBQRModel():
         return test_pred_qs_df
 
 
-    def _format_as_flusight_output(self, preds_df, ref_date, target_name):
+    def _format_as_flusight_output(self, preds_df, ref_date, target_name, keep_agg_levels = False):
         # keep just required columns and rename to match hub format
-        preds_df = preds_df[["location", "wk_end_date", "horizon", "quantile", "value"]] \
+        req_cols = ["location", "wk_end_date", "horizon", "quantile", "value"]
+        
+        if keep_agg_levels:
+            req_cols.insert(0, "agg_level")
+        
+        preds_df = preds_df[req_cols] \
             .rename(columns={"quantile": "output_type_id"})
         
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7*preds_df["horizon"], unit="days")
