@@ -117,7 +117,9 @@ class SARIXModel():
         # keep just required columns and rename to match hub format
         req_cols = ["location", "wk_end_date", "horizon", "output_type_id", "value"]
         
-        if "prop ed visits" in target_name:
+        # we count national as state since it is coded using the same 2-digit fips code
+        preds_df["geo_level"] = np.where(preds_df["agg_level"] == "national", "state", preds_df["agg_level"])
+        if len(preds_df["geo_level"].unique()) > 1:
             req_cols.insert(0, "agg_level")
         
         preds_df = preds_df[req_cols]

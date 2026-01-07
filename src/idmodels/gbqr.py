@@ -190,17 +190,21 @@ class GBQRModel():
             # turn nhsn rates back into counts
             preds_df["value"] = preds_df["value"] * preds_df["pop"] / 100000
             target_name = "wk inc " + run_config.disease + " hosp"
-            gcols = ["location", "reference_date", "horizon",
-                     "target_end_date", "target", "output_type"]
         elif "nssp" in preds_df["source"].unique():
             preds_df["value"] = preds_df["value"] / 100 # percentage to proportion
             preds_df["value"] = np.minimum(preds_df["value"], 1.0)
             target_name = "wk inc " + run_config.disease + " prop ed visits"
-            gcols = ["agg_level", "location", "reference_date", "horizon",
-                     "target_end_date", "target", "output_type"]
+
+        keep_agg_levels = False
+        gcols = ["location", "reference_date", "horizon", "target_end_date", "target", "output_type"]
+        # we count national as state since it is coded using the same 2-digit fips code
+        preds_df["geo_level"] = np.where(preds_df["agg_level"] == "national", "state", preds_df["agg_level"])
+        if len(preds_df["geo_level"].unique()) > 1:
+            keep_agg_levels = True
+            gcols.insert(0, "agg_level")
 
         preds_df["value"] = np.maximum(preds_df["value"], 0.0)
-        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, target_name)
+        preds_df = self._format_as_flusight_output(preds_df, run_config.ref_date, target_name, keep_agg_levels)
         
         # sort quantiles to avoid quantile crossing
         preds_df = self._quantile_noncrossing(preds_df, gcols = gcols)
@@ -291,11 +295,11 @@ class GBQRModel():
         return test_pred_qs_df
 
 
-    def _format_as_flusight_output(self, preds_df, ref_date, target_name):
+    def _format_as_flusight_output(self, preds_df, ref_date, target_name, keep_agg_levels = False):
         # keep just required columns and rename to match hub format
         req_cols = ["location", "wk_end_date", "horizon", "quantile", "value"]
         
-        if "prop ed visits" in target_name:
+        if keep_agg_levels:
             req_cols.insert(0, "agg_level")
         
         preds_df = preds_df[req_cols] \
