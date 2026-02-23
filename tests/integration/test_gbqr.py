@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
-from idmodels.config import (DataSource, Disease, PowerTransform, GBQRModelConfig, GBQRRunConfig)
+from idmodels.config import DataSource, Disease, GBQRModelConfig, GBQRRunConfig, PowerTransform
 from idmodels.gbqr import GBQRModel
 
 

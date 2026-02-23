@@ -7,7 +7,15 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
-from idmodels.config import (DataSource, Disease, PoolingStrategy, PowerTransform, SARIXFourierModelConfig, SARIXModelConfig, SARIXRunConfig)
+from idmodels.config import (
+    DataSource,
+    Disease,
+    PoolingStrategy,
+    PowerTransform,
+    SARIXFourierModelConfig,
+    SARIXModelConfig,
+    SARIXRunConfig,
+)
 from idmodels.sarix import SARIXFourierModel, SARIXModel
 
 
