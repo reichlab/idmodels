@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0]
+
+### Added
+- Concrete configuration dataclasses: `ModelConfig`, `RunConfig` (abstract bases), `SARIXModelConfig`, `SARIXRunConfig`, `GBQRModelConfig`, `GBQRRunConfig`
+- `SARIXFourierModelConfig` dataclass with `fourier_K` and `fourier_pooling` fields
+- Wave feature fields on `GBQRModelConfig` (`use_directional_waves`, `wave_directions`, etc.), disabled by default
+- Enum types: `DataSource`, `Disease`, `PowerTransform`, `PoolingStrategy`
+- Docstrings for `ModelConfig` and `RunConfig` base classes
+- All config types exported from `idmodels.__init__`
+
+### Changed
+- **Breaking**: `model_config.sources` now expects `list[DataSource]` instead of `list[str]`
+- **Breaking**: `model_config.power_transform` now expects `PowerTransform` instead of `str`
+- **Breaking**: `model_config.disease` now expects `Disease` instead of `str`
+- Source validation in `sarix.py` and `gbqr.py` uses `DataSource` enums and set operations instead of `np.isin` with string arrays
+- All tests use concrete config dataclasses instead of `SimpleNamespace`
+- Updated `directional_wave_features.md` examples to use config dataclasses
+
+### Removed
+- `SimpleNamespace` usage throughout tests and documentation
+- `model_class` field from model configurations (implied by the dataclass type)
+- `num_bags` from `GBQRRunConfig` test helper (it is a `GBQRModelConfig` field)
+- `save_feat_importance` from `SARIXRunConfig` test helper (not a SARIX field)
+
 ## [1.1.0] - 2025-12-08
 
 ### Added
@@ -71,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated to latest iddata API
 
-[Unreleased]: https://github.com/reichlab/idmodels/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/reichlab/idmodels/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/reichlab/idmodels/compare/v1.1.0...v1.3.0
 [1.1.0]: https://github.com/reichlab/idmodels/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/reichlab/idmodels/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/reichlab/idmodels/compare/v0.0.1...v0.1.0

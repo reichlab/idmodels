@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -562,8 +562,8 @@ wheels = [
 
 [[package]]
 name = "iddata"
-version = "0.0.1"
-source = { git = "https://github.com/reichlab/iddata#b804f63d85b8f4f1c48cf44e3cb9f6764167bab2" }
+version = "0.1.0"
+source = { git = "https://github.com/reichlab/iddata#d049cd28ebe65ac1a0cba82e84691adc34e6ff09" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
@@ -610,11 +610,11 @@ requires-dist = [
     { name = "iddata", git = "https://github.com/reichlab/iddata" },
     { name = "lightgbm" },
     { name = "numpy" },
-    { name = "pandas" },
+    { name = "pandas", specifier = "~=2.0" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
-    { name = "sarix", git = "https://github.com/reichlab/sarix?rev=35eea2379a9790e0457b1aed41d13509e5d5056f" },
+    { name = "sarix", git = "https://github.com/reichlab/sarix" },
     { name = "scikit-learn" },
     { name = "timeseriesutils", git = "https://github.com/reichlab/timeseriesutils" },
     { name = "tqdm" },
@@ -1635,7 +1635,7 @@ wheels = [
 [[package]]
 name = "sarix"
 version = "0.2.0"
-source = { git = "https://github.com/reichlab/sarix?rev=35eea2379a9790e0457b1aed41d13509e5d5056f#35eea2379a9790e0457b1aed41d13509e5d5056f" }
+source = { git = "https://github.com/reichlab/sarix#35eea2379a9790e0457b1aed41d13509e5d5056f" }
 dependencies = [
     { name = "jax" },
     { name = "matplotlib" },

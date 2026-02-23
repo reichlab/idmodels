@@ -1,11 +1,10 @@
 """Integration test for GBQR model with directional wave features."""
 
 
-from types import SimpleNamespace
-
 import numpy as np
 import pandas as pd
 
+from idmodels.config import DataSource, GBQRModelConfig, PowerTransform
 from idmodels.preprocess import create_directional_wave_features, create_features_and_targets
 
 
@@ -185,7 +184,11 @@ def test_gbqr_wave_features_with_model_config_pattern():
     df = create_realistic_test_data()
 
     # Simulate model_config with wave feature settings
-    model_config = SimpleNamespace(
+    model_config = GBQRModelConfig(
+        model_name="gbqr_wave_test",
+        sources=[DataSource.NHSN],
+        fit_locations_separately=False,
+        power_transform=PowerTransform.FOURTH_ROOT,
         use_directional_waves=True,
         wave_directions=["N", "S", "E", "W"],
         wave_temporal_lags=[1, 2],
@@ -229,9 +232,12 @@ def test_gbqr_wave_features_backwards_compatibility():
     df = create_realistic_test_data()
 
     # Model config WITHOUT wave feature settings (backwards compatibility)
-    model_config = SimpleNamespace(
-        incl_level_feats=True,
-        # No wave feature attributes
+    model_config = GBQRModelConfig(
+        model_name="gbqr_no_waves",
+        sources=[DataSource.NHSN],
+        fit_locations_separately=False,
+        power_transform=PowerTransform.FOURTH_ROOT,
+        # use_directional_waves defaults to False
     )
 
     init_feats = ["inc_trans_cs", "log_pop"]

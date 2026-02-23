@@ -4,6 +4,7 @@ from iddata.loader import DiseaseDataLoader
 from iddata.utils import get_holidays
 from sarix import sarix
 
+from idmodels.config import DataSource, PowerTransform, SARIXFourierModelConfig
 from idmodels.utils import build_save_path
 
 
@@ -16,21 +17,21 @@ class SARIXModel():
         return {}
 
     def run(self, run_config):
-        valid_sources = np.array(["nhsn", "nssp"])
-        if not np.isin(np.array(self.model_config.sources), valid_sources).all():
+        valid_sources = {DataSource.NHSN, DataSource.NSSP}
+        if not set(self.model_config.sources) <= valid_sources:
             raise ValueError("For SARIX, the only supported data sources are 'nhsn' or 'nssp'.")
-        
+
         # Check if both nhsn and nssp data are included as sources
-        if all(src in self.model_config.sources for src in ["nhsn", "nssp"]):
+        if (DataSource.NHSN in self.model_config.sources) and (DataSource.NSSP in self.model_config.sources):
             raise ValueError("Only one of 'nhsn' or 'nssp' may be selected as a data source.")
 
         fdl = DiseaseDataLoader()
-        if "nhsn" in self.model_config.sources:
+        if DataSource.NHSN in self.model_config.sources:
             df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
                                sources=self.model_config.sources,
                                power_transform=self.model_config.power_transform)
             target_name = "wk inc " + run_config.disease + " hosp"
-        elif "nssp" in self.model_config.sources:
+        elif DataSource.NSSP in self.model_config.sources:
             df = fdl.load_data(nssp_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
                                sources=self.model_config.sources,
                                power_transform=self.model_config.power_transform)
@@ -57,6 +58,7 @@ class SARIXModel():
    
         # missing values are interpolated when possible
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
+
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
         batched_xy = df[xy_colnames].values.reshape(len(df["unique_id"].unique()), -1, len(xy_colnames))
 
@@ -98,7 +100,7 @@ class SARIXModel():
         
         # build data frame with predictions on the original scale
         preds_df["value"] = (preds_df["value"] + preds_df["inc_trans_center_factor"]) * preds_df["inc_trans_scale_factor"]
-        if self.model_config.power_transform == "4rt":
+        if self.model_config.power_transform == PowerTransform.FOURTH_ROOT:
             preds_df["value"] = np.maximum(preds_df["value"], 0.0) ** 4
         else:
             preds_df["value"] = np.maximum(preds_df["value"], 0.0) ** 2
@@ -152,6 +154,13 @@ class SARIXFourierModel(SARIXModel):
     - fourier_K: Number of Fourier harmonic pairs (int)
     - fourier_pooling: How to share Fourier coefficients across locations ('none' or 'shared')
     """
+    def __init__(self, model_config):
+        if not isinstance(model_config, SARIXFourierModelConfig):
+            raise TypeError(
+                f"SARIXFourierModel requires a SARIXFourierModelConfig, got {type(model_config).__name__}"
+            )
+        super().__init__(model_config)
+
     def _get_extra_sarix_params(self, df):
         """Return Fourier-specific parameters for SARIX constructor."""
         # Extract day-of-year from dates for Fourier features
