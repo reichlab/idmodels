@@ -63,7 +63,7 @@ class GBQRModel():
         df["unique_id"] = df["agg_level"] + df["location"]
 
         # augment data with features and target values
-        if run_config.disease == Disease.FLU:
+        if (run_config.disease == Disease.FLU) or (run_config.disease == Disease.RSV):
             init_feats = ["inc_trans_cs", "season_week", "log_pop"]
         elif run_config.disease == Disease.COVID:
             init_feats = ["inc_trans_cs", "log_pop"]
@@ -88,7 +88,7 @@ class GBQRModel():
             curr_feat_names=init_feats)
         
         # keep only rows that are in-season
-        if run_config.disease == Disease.FLU:
+        if (run_config.disease == Disease.FLU) or (run_config.disease == Disease.RSV):
             df = df.query("season_week >= 5 and season_week <= 45")
         
         # "test set" df used to generate look-ahead predictions
@@ -179,6 +179,8 @@ class GBQRModel():
         preds_df["inc_trans_target_hat"] = (preds_df["inc_trans_cs_target_hat"] + preds_df["inc_trans_center_factor"]) * (preds_df["inc_trans_scale_factor"] + 0.01)
         if self.model_config.power_transform == PowerTransform.FOURTH_ROOT:
             inv_power = 4
+        elif self.model_config.power_transform == PowerTransform.NONE:
+            inv_power = 1
         else:
             raise ValueError(f"unsupported power_transform: {self.model_config.power_transform!r}")
         
@@ -275,7 +277,7 @@ class GBQRModel():
                 test_preds_by_bag[:, b, q_ind] = model.predict(X=x_test)
         
         # combine and save feature importance scores
-        if run_config.save_feat_importance:
+        if self.model_config.save_feat_importance:
             feat_importance = pd.concat(feat_importance, axis=0)
             save_path = build_save_path(
                 root=run_config.artifact_store_root,

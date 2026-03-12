@@ -12,9 +12,9 @@ from idmodels.config import (
     Disease,
     PoolingStrategy,
     PowerTransform,
+    RunConfig,
     SARIXFourierModelConfig,
     SARIXModelConfig,
-    SARIXRunConfig,
 )
 from idmodels.sarix import SARIXFourierModel, SARIXModel
 
@@ -27,21 +27,22 @@ def test_sarix_nhsn(tmp_path):
                 "33", "34", "35", "36", "37", "38", "39", "40", "41", "42",
                 "44", "45", "46", "47", "48", "49", "50", "51", "53", "54",
                 "55", "56", "72"]
-    model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling=PoolingStrategy.SHARED, sigma_pooling=PoolingStrategy.NONE)
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], num=200, tmp_path=tmp_path)
-    
+    model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling=PoolingStrategy.SHARED,
+                                                  sigma_pooling=PoolingStrategy.NONE, num=200)
+    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
+
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
     with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()):
         model = SARIXModel(model_config)
         model.run(run_config)
 
     actual_df = pd.read_csv(
-        run_config.output_root / f"UMass-{model_config.model_name}" / 
+        run_config.output_root / f"UMass-{model_config.model_name}" /
         f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
     )
     expected_df = pd.read_csv(
         Path("tests") / "integration" / "data" /
-        f"UMass-{model_config.model_name}" / 
+        f"UMass-{model_config.model_name}" /
         f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
     )
     assert_frame_equal(actual_df, expected_df)
@@ -54,8 +55,9 @@ def test_sarix_nhsn(tmp_path):
 ])
 def test_sarix_nssp(tmp_path, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-11-22")
-    model_config = create_test_sarix_model_config(main_source=[DataSource.NSSP], theta_pooling=PoolingStrategy.SHARED, sigma_pooling=PoolingStrategy.NONE)
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=nci_ids, num=200, tmp_path=tmp_path)
+    model_config = create_test_sarix_model_config(main_source=[DataSource.NSSP], theta_pooling=PoolingStrategy.SHARED,
+                                                  sigma_pooling=PoolingStrategy.NONE, num=200)
+    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=nci_ids, tmp_path=tmp_path)
     
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
     if (fips_codes != []) & (nci_ids == []):
@@ -89,8 +91,9 @@ def test_sarix_shared_sigma_pooling_multiple_batches(tmp_path):
     # Use multiple locations to ensure we have multiple batches
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05"]  # Multiple locs = multiple batches
-    model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling=PoolingStrategy.NONE, sigma_pooling=PoolingStrategy.SHARED)
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], num=200, tmp_path=tmp_path)
+    model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling=PoolingStrategy.NONE,
+                                                  sigma_pooling=PoolingStrategy.SHARED, num=200)
+    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
     
     model = SARIXModel(model_config)
     model.run(run_config)
@@ -131,13 +134,14 @@ def test_sarix_fourier_none_pooling(tmp_path):
         sigma_pooling=PoolingStrategy.SHARED,
         fourier_K=2,
         fourier_pooling=PoolingStrategy.NONE,
-        x=[]
-    )
+        x=[],
+        num_warmup=50,
+        num_samples=50)
 
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05"] # fewer locs for faster testing
     # model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling="shared", sigma_pooling="none")
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], num=50, tmp_path=tmp_path)
+    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
 
     model = SARIXFourierModel(model_config)
     model.run(run_config)
@@ -178,13 +182,14 @@ def test_sarix_fourier_shared_pooling(tmp_path):
         sigma_pooling=PoolingStrategy.SHARED,
         fourier_K=2,
         fourier_pooling=PoolingStrategy.SHARED,
-        x=[]
-    )
+        x=[],
+        num_warmup=50,
+        num_samples=50)
 
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05"] # fewer locs for faster testing
     # model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling="shared", sigma_pooling="none")
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], num=50, tmp_path=tmp_path)
+    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
 
     model = SARIXFourierModel(model_config)
     model.run(run_config)
@@ -226,7 +231,7 @@ def test_sarix_fourier_wrong_config_type():
         SARIXFourierModel(model_config)
 
 
-def create_test_sarix_model_config(main_source, theta_pooling: PoolingStrategy, sigma_pooling: PoolingStrategy):
+def create_test_sarix_model_config(main_source, theta_pooling: PoolingStrategy, sigma_pooling: PoolingStrategy, num: int = 200):
     model_config = SARIXModelConfig(
         model_name = "sarix_" + main_source[0].value + "_p6_4rt_theta" + theta_pooling.value + "_sigma" + sigma_pooling.value,
 
@@ -251,12 +256,16 @@ def create_test_sarix_model_config(main_source, theta_pooling: PoolingStrategy, 
         sigma_pooling=sigma_pooling,
 
         # covariates
-        x = []
+        x=[],
+
+        num_warmup=num,
+        num_samples=num,
+        num_chains=1
     )
     return model_config
 
-def create_test_sarix_run_config(ref_date, states, hsas, num, tmp_path):
-    run_config = SARIXRunConfig(
+def create_test_sarix_run_config(ref_date, states, hsas, tmp_path):
+    run_config = RunConfig(
         disease=Disease.FLU,
         ref_date=ref_date,
         output_root=tmp_path / "model-output",
@@ -264,11 +273,8 @@ def create_test_sarix_run_config(ref_date, states, hsas, num, tmp_path):
         states=states,
         hsas = hsas,
         max_horizon=3,
-        q_levels = [0.025, 0.50, 0.975],
-        q_labels = ["0.025", "0.5", "0.975"],
-        num_warmup = num,
-        num_samples = num,
-        num_chains = 1
+        q_levels=[0.025, 0.50, 0.975],
+        q_labels=["0.025", "0.5", "0.975"],
     )
     return run_config
     

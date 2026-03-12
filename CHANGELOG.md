@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1]
+
+### Changed
+- **Breaking**: `SARIXRunConfig` and `GBQRRunConfig` removed; use `RunConfig` directly (was abstract but is now directly instantiable)
+- **Breaking**: `num_warmup`, `num_samples`, `num_chains` moved from `SARIXRunConfig` to `SARIXModelConfig`
+- **Breaking**: `save_feat_importance` moved from `GBQRRunConfig` to `GBQRModelConfig`
+
 ## [1.3.0]
 
 ### Added

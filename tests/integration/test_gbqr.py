@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
-from idmodels.config import DataSource, Disease, GBQRModelConfig, GBQRRunConfig, PowerTransform
+from idmodels.config import DataSource, Disease, GBQRModelConfig, PowerTransform, RunConfig
 from idmodels.gbqr import GBQRModel
 
 
@@ -108,17 +108,16 @@ def create_test_gbqr_model_config(sources):
     return model_config
 
 def create_test_gbqr_run_config(ref_date, states, hsas, tmp_path):
-    run_config = GBQRRunConfig(
+    run_config = RunConfig(
         disease=Disease.FLU,
         ref_date=ref_date,
         output_root=tmp_path / "model-output",
         artifact_store_root=tmp_path / "artifact-store",
-        save_feat_importance=False,
         states=states,
-        hsas = hsas,
+        hsas=hsas,
         max_horizon=3,
-        q_levels = [0.025, 0.50, 0.975],
-        q_labels = ["0.025", "0.5", "0.975"],
+        q_levels=[0.025, 0.50, 0.975],
+        q_labels=["0.025", "0.5", "0.975"],
     )
     return run_config
 

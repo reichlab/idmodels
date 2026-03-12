@@ -15,10 +15,12 @@ class DataSource(str, Enum):
 class Disease(str, Enum):
     FLU = "flu"
     COVID = "covid"
+    RSV = "rsv"
 
 
 class PowerTransform(str, Enum):
     FOURTH_ROOT = "4rt"
+    NONE = "none"
 
 
 class PoolingStrategy(str, Enum):
@@ -46,12 +48,11 @@ class ModelConfig(ABC):
 
 
 @dataclass
-class RunConfig(ABC):
+class RunConfig:
     """
-    Abstract base for run configuration.
+    Run configuration.
 
     Holds settings that describe a single execution: which disease, which locations, output paths, quantile levels, etc.
-    Not instantiated directly - use :class:`SARIXRunConfig` or :class:`GBQRRunConfig`.
     """
 
     disease: Disease
@@ -64,10 +65,6 @@ class RunConfig(ABC):
     q_levels: list[float]
     q_labels: list[str]
 
-    def __post_init__(self):
-        if type(self) is RunConfig:
-            raise TypeError("RunConfig is abstract - use SARIXRunConfig or GBQRRunConfig")
-
 
 @dataclass
 class SARIXModelConfig(ModelConfig):
@@ -79,6 +76,9 @@ class SARIXModelConfig(ModelConfig):
     theta_pooling: PoolingStrategy = PoolingStrategy.NONE
     sigma_pooling: PoolingStrategy = PoolingStrategy.NONE
     x: list = field(default_factory=list)
+    num_warmup: int = 2000
+    num_samples: int = 2000
+    num_chains: int = 1
 
 
 @dataclass
@@ -93,6 +93,8 @@ class GBQRModelConfig(ModelConfig):
     num_bags: int = 100
     bag_frac_samples: float = 0.7
     reporting_adj: bool = False
+    save_feat_importance: bool = False
+
     # directional wave features (disabled by default)
     use_directional_waves: bool = False
     wave_directions: list[str] = field(default_factory=lambda: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
@@ -100,15 +102,3 @@ class GBQRModelConfig(ModelConfig):
     wave_max_distance_km: float = 1000.0
     wave_include_velocity: bool = False
     wave_include_aggregate: bool = True
-
-
-@dataclass
-class SARIXRunConfig(RunConfig):
-    num_warmup: int = 2000
-    num_samples: int = 2000
-    num_chains: int = 1
-
-
-@dataclass
-class GBQRRunConfig(RunConfig):
-    save_feat_importance: bool = False

@@ -245,7 +245,7 @@ The implementation includes validation that warns about:
 ```python
 import datetime
 from pathlib import Path
-from idmodels.config import DataSource, Disease, GBQRModelConfig, GBQRRunConfig, PowerTransform
+from idmodels.config import DataSource, Disease, GBQRModelConfig, PowerTransform, RunConfig
 from idmodels.gbqr import GBQRModel
 
 # Model configuration with directional wave features
@@ -258,6 +258,7 @@ model_config = GBQRModelConfig(
     num_bags = 10,
     bag_frac_samples = 0.7,
     reporting_adj = False,
+    save_feat_importance = True,
 
     # Directional wave features
     use_directional_waves = True,
@@ -269,7 +270,7 @@ model_config = GBQRModelConfig(
 )
 
 # Run configuration
-run_config = GBQRRunConfig(
+run_config = RunConfig(
     disease = Disease.FLU,
     ref_date = datetime.date(2024, 1, 6),
     output_root = Path("output/"),
@@ -279,7 +280,6 @@ run_config = GBQRRunConfig(
     hsas = [],
     q_levels = [0.025, 0.10, 0.25, 0.50, 0.75, 0.90, 0.975],
     q_labels = ["0.025", "0.1", "0.25", "0.5", "0.75", "0.9", "0.975"],
-    save_feat_importance = True
 )
 
 # Run model

@@ -2,18 +2,16 @@ from idmodels.config import (
                              DataSource,
                              Disease,
                              GBQRModelConfig,
-                             GBQRRunConfig,
                              PoolingStrategy,
                              PowerTransform,
+                             RunConfig,
                              SARIXFourierModelConfig,
                              SARIXModelConfig,
-                             SARIXRunConfig,
 )
 from idmodels.gbqr import GBQRModel
 from idmodels.sarix import SARIXFourierModel, SARIXModel
 
-__all__ = ["DataSource", "Disease", "GBQRModel", "GBQRModelConfig", "GBQRRunConfig", "PoolingStrategy",
-           "PowerTransform", "SARIXFourierModel", "SARIXFourierModelConfig", "SARIXModel", "SARIXModelConfig",
-           "SARIXRunConfig"]
+__all__ = ["DataSource", "Disease", "GBQRModel", "GBQRModelConfig", "PoolingStrategy", "PowerTransform", "RunConfig",
+           "SARIXFourierModel", "SARIXFourierModelConfig", "SARIXModel", "SARIXModelConfig"]
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"

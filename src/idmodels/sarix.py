@@ -75,10 +75,10 @@ class SARIXModel():
             transform="none", # transformations are handled outside of SARIX
             theta_pooling=self.model_config.theta_pooling,
             sigma_pooling=self.model_config.sigma_pooling,
-            forecast_horizon = run_config.max_horizon,
-            num_warmup = run_config.num_warmup,
-            num_samples = run_config.num_samples,
-            num_chains = run_config.num_chains,
+            forecast_horizon=run_config.max_horizon,
+            num_warmup=self.model_config.num_warmup,
+            num_samples=self.model_config.num_samples,
+            num_chains=self.model_config.num_chains,
             **extra_params
         )
 
