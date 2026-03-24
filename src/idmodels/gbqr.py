@@ -6,6 +6,7 @@ import pandas as pd
 from iddata.loader import DiseaseDataLoader
 from tqdm.autonotebook import tqdm
 
+from idmodels.config import DataSource, Disease, PowerTransform
 from idmodels.preprocess import create_directional_wave_features, create_features_and_targets
 from idmodels.utils import build_save_path
 
@@ -31,22 +32,22 @@ class GBQRModel():
             ilinet_kwargs = {"scale_to_positive": False}
             flusurvnet_kwargs = {"burden_adj": False}
         
-        valid_sources = ["flusurvnet", "nhsn", "ilinet", "nssp"]
-        if not np.isin(np.array(self.model_config.sources), valid_sources).all():
+        valid_sources = {DataSource.FLUSURVNET, DataSource.NHSN, DataSource.ILINET, DataSource.NSSP}
+        if not set(self.model_config.sources) <= valid_sources:
           raise ValueError("For GBQR, the only supported data sources are 'nhsn', 'flusurvnet', 'ilinet', or 'nssp'.")
-        
+
         # Check if both nhsn and nssp data are included as sources
-        if all(src in self.model_config.sources for src in ["nhsn", "nssp"]):
+        if (DataSource.NHSN in self.model_config.sources) and (DataSource.NSSP in self.model_config.sources):
             raise ValueError("Only one of 'nhsn' or 'nssp' may be selected as a data source.")
-        
+
         fdl = DiseaseDataLoader()
-        if "nhsn" in self.model_config.sources:
+        if DataSource.NHSN in self.model_config.sources:
             df = fdl.load_data(nhsn_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
                                ilinet_kwargs=ilinet_kwargs,
                                flusurvnet_kwargs=flusurvnet_kwargs,
                                sources=self.model_config.sources,
                                power_transform=self.model_config.power_transform)
-        elif "nssp" in self.model_config.sources:
+        elif DataSource.NSSP in self.model_config.sources:
             df = fdl.load_data(nssp_kwargs={"as_of": run_config.ref_date, "disease": run_config.disease},
                                ilinet_kwargs=ilinet_kwargs,
                                flusurvnet_kwargs=flusurvnet_kwargs,
@@ -62,20 +63,20 @@ class GBQRModel():
         df["unique_id"] = df["agg_level"] + df["location"]
 
         # augment data with features and target values
-        if run_config.disease == "flu":
+        if (run_config.disease == Disease.FLU) or (run_config.disease == Disease.RSV):
             init_feats = ["inc_trans_cs", "season_week", "log_pop"]
-        elif run_config.disease == "covid":
+        elif run_config.disease == Disease.COVID:
             init_feats = ["inc_trans_cs", "log_pop"]
 
         # Create directional wave features if enabled
-        if hasattr(self.model_config, "use_directional_waves") and self.model_config.use_directional_waves:
+        if self.model_config.use_directional_waves:
             wave_config = {
                 "enabled": True,
-                "directions": getattr(self.model_config, "wave_directions", ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]),
-                "temporal_lags": getattr(self.model_config, "wave_temporal_lags", [1, 2]),
-                "max_distance_km": getattr(self.model_config, "wave_max_distance_km", 1000),
-                "include_velocity": getattr(self.model_config, "wave_include_velocity", False),
-                "include_aggregate": getattr(self.model_config, "wave_include_aggregate", True)
+                "directions": self.model_config.wave_directions,
+                "temporal_lags": self.model_config.wave_temporal_lags,
+                "max_distance_km": self.model_config.wave_max_distance_km,
+                "include_velocity": self.model_config.wave_include_velocity,
+                "include_aggregate": self.model_config.wave_include_aggregate,
             }
             df, wave_feat_names = create_directional_wave_features(df, wave_config)
             init_feats = init_feats + wave_feat_names
@@ -87,7 +88,7 @@ class GBQRModel():
             curr_feat_names=init_feats)
         
         # keep only rows that are in-season
-        if run_config.disease == "flu":
+        if (run_config.disease == Disease.FLU) or (run_config.disease == Disease.RSV):
             df = df.query("season_week >= 5 and season_week <= 45")
         
         # "test set" df used to generate look-ahead predictions
@@ -176,12 +177,12 @@ class GBQRModel():
         # build data frame with predictions on the original scale
         preds_df["inc_trans_cs_target_hat"] = preds_df["inc_trans_cs"] + preds_df["delta_hat"]
         preds_df["inc_trans_target_hat"] = (preds_df["inc_trans_cs_target_hat"] + preds_df["inc_trans_center_factor"]) * (preds_df["inc_trans_scale_factor"] + 0.01)
-        if self.model_config.power_transform == "4rt":
+        if self.model_config.power_transform == PowerTransform.FOURTH_ROOT:
             inv_power = 4
-        elif self.model_config.power_transform is None:
+        elif self.model_config.power_transform == PowerTransform.NONE:
             inv_power = 1
         else:
-            raise ValueError('unsupported power_transform: must be "4rt" or None')
+            raise ValueError(f"unsupported power_transform: {self.model_config.power_transform!r}")
         
         preds_df["value"] = (np.maximum(preds_df["inc_trans_target_hat"], 0.0) ** inv_power - 0.01 - 0.75**4)
         
@@ -276,7 +277,7 @@ class GBQRModel():
                 test_preds_by_bag[:, b, q_ind] = model.predict(X=x_test)
         
         # combine and save feature importance scores
-        if run_config.save_feat_importance:
+        if self.model_config.save_feat_importance:
             feat_importance = pd.concat(feat_importance, axis=0)
             save_path = build_save_path(
                 root=run_config.artifact_store_root,

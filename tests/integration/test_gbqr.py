@@ -1,6 +1,5 @@
 import datetime
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import lightgbm
@@ -9,6 +8,7 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
+from idmodels.config import DataSource, Disease, GBQRModelConfig, PowerTransform, RunConfig
 from idmodels.gbqr import GBQRModel
 
 
@@ -20,7 +20,7 @@ def test_gbqr_nhsn(tmp_path):
                 "33", "34", "35", "36", "37", "38", "39", "40", "41", "42",
                 "44", "45", "46", "47", "48", "49", "50", "51", "53", "54",
                 "55", "56", "72"]
-    model_config = create_test_gbqr_model_config(sources = ["flusurvnet", "nhsn", "ilinet"])
+    model_config = create_test_gbqr_model_config(sources = [DataSource.FLUSURVNET, DataSource.NHSN, DataSource.ILINET])
     run_config = create_test_gbqr_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
 
     # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
@@ -46,7 +46,7 @@ def test_gbqr_nhsn(tmp_path):
 ])
 def test_gbqr_nssp(tmp_path, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-11-22")
-    model_config = create_test_gbqr_model_config(sources=["nssp"])
+    model_config = create_test_gbqr_model_config(sources=[DataSource.NSSP])
     run_config = create_test_gbqr_run_config(ref_date=date, states=fips_codes, hsas=nci_ids, tmp_path=tmp_path)
 
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
@@ -77,17 +77,16 @@ def test_gbqr_nssp(tmp_path, fips_codes, nci_ids):
 
 
 def create_test_gbqr_model_config(sources):
-    if "nhsn" in sources:
-        main_source = "nhsn"
-    elif "nssp" in sources:
-        main_source = "nssp"
+    if DataSource.NHSN in sources:
+        main_source = DataSource.NHSN
+    elif DataSource.NSSP in sources:
+        main_source = DataSource.NSSP
     else:
         main_source = None
-        
-    model_config = SimpleNamespace(
-        model_class = "gbqr",
-        model_name = "gbqr_" + main_source + "_no_reporting_adj",
-        
+
+    model_config = GBQRModelConfig(
+        model_name = "gbqr_" + main_source.value + "_no_reporting_adj",
+
         incl_level_feats = True,
 
         # bagging setup
@@ -96,31 +95,29 @@ def create_test_gbqr_model_config(sources):
 
         # adjustments to reporting
         reporting_adj = False,
-        
+
         # data sources and adjustments for reporting issues
         sources = sources,
-        
+
         # fit locations separately or jointly
         fit_locations_separately = False,
-        
+
         # power transform applied to surveillance signals
-        power_transform = "4rt",
+        power_transform = PowerTransform.FOURTH_ROOT,
     )
     return model_config
 
 def create_test_gbqr_run_config(ref_date, states, hsas, tmp_path):
-    run_config = SimpleNamespace(
-        disease="flu",
+    run_config = RunConfig(
+        disease=Disease.FLU,
         ref_date=ref_date,
         output_root=tmp_path / "model-output",
         artifact_store_root=tmp_path / "artifact-store",
-        save_feat_importance=False,
         states=states,
-        hsas = hsas,
+        hsas=hsas,
         max_horizon=3,
-        q_levels = [0.025, 0.50, 0.975],
-        q_labels = ["0.025", "0.5", "0.975"],
-        num_bags = 10
+        q_levels=[0.025, 0.50, 0.975],
+        q_labels=["0.025", "0.5", "0.975"],
     )
     return run_config
 

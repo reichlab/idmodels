@@ -43,10 +43,13 @@ For each location and time point, the following features are generated:
 Directional wave features are **disabled by default** for backwards compatibility. To enable them, add the following parameters to your `model_config`:
 
 ```python
-from types import SimpleNamespace
+from idmodels.config import DataSource, GBQRModelConfig, PowerTransform
 
-model_config = SimpleNamespace(
-    # ... existing parameters ...
+model_config = GBQRModelConfig(
+    model_name = "gbqr_with_waves",
+    sources = [DataSource.NHSN],
+    fit_locations_separately = False,
+    power_transform = PowerTransform.FOURTH_ROOT,
 
     # Directional wave features (disabled by default)
     use_directional_waves = True,  # Set to True to enable
@@ -111,8 +114,8 @@ model_config = SimpleNamespace(
 
 ### Minimal Configuration (4 cardinal directions)
 ```python
-model_config = SimpleNamespace(
-    # ... other params ...
+model_config = GBQRModelConfig(
+    # ... required base params ...
     use_directional_waves = True,
     wave_directions = ['N', 'S', 'E', 'W']
 )
@@ -121,8 +124,8 @@ Generates: 4 base + 4 aggregate + (4+1)×2 lags = **14 features**
 
 ### Standard Configuration (8 directions)
 ```python
-model_config = SimpleNamespace(
-    # ... other params ...
+model_config = GBQRModelConfig(
+    # ... required base params ...
     use_directional_waves = True,
     wave_directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'],
     wave_temporal_lags = [1, 2]
@@ -132,8 +135,8 @@ Generates: 8 base + 1 aggregate + (8+1)×2 lags = **27 features**
 
 ### Maximum Information (all options)
 ```python
-model_config = SimpleNamespace(
-    # ... other params ...
+model_config = GBQRModelConfig(
+    # ... required base params ...
     use_directional_waves = True,
     wave_directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'],
     wave_temporal_lags = [1, 2],
@@ -147,8 +150,8 @@ Generates: 8 base + 1 aggregate + (8+1)×2 lags + (8+1) velocity = **36 features
 ### Hypothesis-Driven (specific directions)
 ```python
 # If you suspect disease spreads along NE-SW axis
-model_config = SimpleNamespace(
-    # ... other params ...
+model_config = GBQRModelConfig(
+    # ... required base params ...
     use_directional_waves = True,
     wave_directions = ['NE', 'SW'],
     wave_temporal_lags = [1, 2, 3],  # Longer lags for slower spread
@@ -240,22 +243,22 @@ The implementation includes validation that warns about:
 ## Example: Complete GBQR Configuration
 
 ```python
-from types import SimpleNamespace
+import datetime
+from pathlib import Path
+from idmodels.config import DataSource, Disease, GBQRModelConfig, PowerTransform, RunConfig
 from idmodels.gbqr import GBQRModel
 
 # Model configuration with directional wave features
-model_config = SimpleNamespace(
-    model_class = "gbqr",
+model_config = GBQRModelConfig(
     model_name = "gbqr_with_waves",
-
-    # Standard GBQR parameters
+    sources = [DataSource.NHSN],
+    fit_locations_separately = False,
+    power_transform = PowerTransform.FOURTH_ROOT,
     incl_level_feats = True,
     num_bags = 10,
     bag_frac_samples = 0.7,
     reporting_adj = False,
-    sources = ["nhsn"],
-    fit_locations_separately = False,
-    power_transform = "4rt",
+    save_feat_importance = True,
 
     # Directional wave features
     use_directional_waves = True,
@@ -267,16 +270,16 @@ model_config = SimpleNamespace(
 )
 
 # Run configuration
-run_config = SimpleNamespace(
-    disease = "flu",
+run_config = RunConfig(
+    disease = Disease.FLU,
     ref_date = datetime.date(2024, 1, 6),
-    output_root = "output/",
-    artifact_store_root = "artifacts/",
-    save_feat_importance = True,
-    locations = None,  # All locations
+    output_root = Path("output/"),
+    artifact_store_root = Path("artifacts/"),
     max_horizon = 4,
+    states = ["US", "01", "06", "13", "36", "48"],
+    hsas = [],
     q_levels = [0.025, 0.10, 0.25, 0.50, 0.75, 0.90, 0.975],
-    q_labels = ["0.025", "0.1", "0.25", "0.5", "0.75", "0.9", "0.975"]
+    q_labels = ["0.025", "0.1", "0.25", "0.5", "0.75", "0.9", "0.975"],
 )
 
 # Run model

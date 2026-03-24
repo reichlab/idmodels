@@ -14,8 +14,8 @@ dependencies = [
     "iddata @ git+https://github.com/reichlab/iddata",
     "lightgbm",
     "numpy",
-    "pandas",
-    "sarix @ git+https://github.com/reichlab/sarix",
+    "pandas~=2.0",  # pandas 3.0 breaks compatibility; remove cap once validated
+    "sarix @ git+https://github.com/reichlab/sarix@35eea2379a9790e0457b1aed41d13509e5d5056f",
     "scikit-learn",
     "tqdm",
     "timeseriesutils @ git+https://github.com/reichlab/timeseriesutils"
