@@ -4,18 +4,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-
-class DataSource(str, Enum):
-    NHSN = "nhsn"
-    NSSP = "nssp"
-    FLUSURVNET = "flusurvnet"
-    ILINET = "ilinet"
-
-
-class Disease(str, Enum):
-    FLU = "flu"
-    COVID = "covid"
-    RSV = "rsv"
+from iddata.enums import (
+    Disease,  # used internally for RunConfig.disease; import from iddata.enums directly in callers
+    SourceType,  # re-exported for callers: from idmodels.config import SourceType
+)
 
 
 class PowerTransform(str, Enum):
@@ -30,17 +22,13 @@ class PoolingStrategy(str, Enum):
 
 @dataclass
 class ModelConfig(ABC):
-    """
-    Abstract base for model configuration.
-
-    Holds settings that describe *what* model to run and how it processes data (sources, transforms, pooling).
-    Not instantiated directly - use :class:`SARIXModelConfig` or :class:`GBQRModelConfig`.
-    """
+    """Abstract base for model configuration."""
 
     model_name: str
-    sources: list[DataSource]
+    sources: list[SourceType]
     fit_locations_separately: bool
     power_transform: PowerTransform
+
 
     def __post_init__(self):
         if type(self) is ModelConfig:
@@ -49,11 +37,7 @@ class ModelConfig(ABC):
 
 @dataclass
 class RunConfig:
-    """
-    Run configuration.
-
-    Holds settings that describe a single execution: which disease, which locations, output paths, quantile levels, etc.
-    """
+    """Run configuration: disease, locations, output paths, quantile levels."""
 
     disease: Disease
     ref_date: datetime.date
@@ -95,7 +79,6 @@ class GBQRModelConfig(ModelConfig):
     reporting_adj: bool = False
     save_feat_importance: bool = False
 
-    # directional wave features (disabled by default)
     use_directional_waves: bool = False
     wave_directions: list[str] = field(default_factory=lambda: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
     wave_temporal_lags: list[int] = field(default_factory=lambda: [1, 2])

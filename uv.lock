@@ -614,7 +614,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
-    { name = "sarix", git = "https://github.com/reichlab/sarix" },
+    { name = "sarix", git = "https://github.com/reichlab/sarix?rev=35eea2379a9790e0457b1aed41d13509e5d5056f" },
     { name = "scikit-learn" },
     { name = "timeseriesutils", git = "https://github.com/reichlab/timeseriesutils" },
     { name = "tqdm" },
@@ -1635,7 +1635,7 @@ wheels = [
 [[package]]
 name = "sarix"
 version = "0.2.0"
-source = { git = "https://github.com/reichlab/sarix#35eea2379a9790e0457b1aed41d13509e5d5056f" }
+source = { git = "https://github.com/reichlab/sarix?rev=35eea2379a9790e0457b1aed41d13509e5d5056f#35eea2379a9790e0457b1aed41d13509e5d5056f" }
 dependencies = [
     { name = "jax" },
     { name = "matplotlib" },
