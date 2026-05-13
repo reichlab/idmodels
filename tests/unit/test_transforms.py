@@ -118,6 +118,46 @@ class TestCenterScaleTransform:
         assert out["inc_trans_scale_factor"].notna().all()
 
 
+    def test_custom_in_season_week_bounds(self):
+        """Custom in_season_week_min/max changes which rows determine the scale factor."""
+        df = make_df(n_per_group=52, n_groups=1)
+        df["inc_trans"] = (df["inc"] + POWER_TRANSFORM_OFFSET) ** 0.25
+
+        t_default = CenterScaleTransform()            # weeks 10–45
+        t_narrow = CenterScaleTransform(in_season_week_min=1, in_season_week_max=5)
+        out_default = t_default.apply(df.copy())
+        out_narrow = t_narrow.apply(df.copy())
+
+        # Different in-season windows should generally produce different scale factors
+        assert not np.isclose(out_default["inc_trans_scale_factor"].iloc[0],
+                              out_narrow["inc_trans_scale_factor"].iloc[0])
+
+
+    def test_scale_factor_is_95th_percentile_of_in_season(self):
+        df = make_df(n_per_group=52, n_groups=1)
+        df["inc_trans"] = (df["inc"] + POWER_TRANSFORM_OFFSET) ** 0.25
+
+        t = CenterScaleTransform()  # IN_SEASON_WEEK_MIN=10, IN_SEASON_WEEK_MAX=45
+        out = t.apply(df.copy())
+
+        in_season = df.loc[(df["season_week"] >= 10) & (df["season_week"] <= 45), "inc_trans"]
+        expected_scale = in_season.quantile(0.95)
+        np.testing.assert_allclose(out["inc_trans_scale_factor"].iloc[0], expected_scale)
+
+
+    def test_center_factor_is_mean_of_in_season_cs(self):
+        df = make_df(n_per_group=52, n_groups=1)
+        df["inc_trans"] = (df["inc"] + POWER_TRANSFORM_OFFSET) ** 0.25
+
+        t = CenterScaleTransform()
+        out = t.apply(df.copy())
+
+        scale = out["inc_trans_scale_factor"].iloc[0]
+        in_season = df.loc[(df["season_week"] >= 10) & (df["season_week"] <= 45), "inc_trans"]
+        expected_center = (in_season / (scale + 0.01)).mean()
+        np.testing.assert_allclose(out["inc_trans_center_factor"].iloc[0], expected_center)
+
+
 class TestComposedTransform:
     def test_roundtrip_fourth_root_then_center_scale(self):
         df = make_df(n_per_group=52)

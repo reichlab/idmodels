@@ -95,8 +95,8 @@ class GBQRModel(IDModel):
         if self.model_config.fit_locations_separately:
             unique_ids = df_test["unique_id"].unique()
             preds_df = pd.concat(
-                [self._train_gbq_and_predict(run_config, df_train, df_test, feat_names, loc)
-                 for loc in unique_ids],
+                [self._train_gbq_and_predict(run_config, df_train, df_test, feat_names, uid)
+                 for uid in unique_ids],
                 axis=0,
             )
         else:
@@ -105,10 +105,10 @@ class GBQRModel(IDModel):
         return preds_df
 
 
-    def _train_gbq_and_predict(self, run_config, df_train, df_test, feat_names, location=None):
-        if location is not None:
-            df_test = df_test.query(f'unique_id == "{location}"')
-            df_train = df_train.query(f'unique_id == "{location}"')
+    def _train_gbq_and_predict(self, run_config, df_train, df_test, feat_names, unique_id=None):
+        if unique_id is not None:
+            df_test = df_test.query(f'unique_id == "{unique_id}"')
+            df_train = df_train.query(f'unique_id == "{unique_id}"')
 
         x_test = df_test[feat_names]
         x_train = df_train[feat_names]

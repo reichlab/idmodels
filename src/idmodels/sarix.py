@@ -5,7 +5,7 @@ from iddata.sources.nssp import NSSPDataSource
 from sarix import sarix
 
 from idmodels.config import RunConfig, SARIXFourierModelConfig, SARIXModelConfig, SourceType
-from idmodels.features import FeaturePipeline, HolidayFeature
+from idmodels.features import FeaturePipeline
 from idmodels.model import IDModel
 
 
@@ -33,18 +33,13 @@ class SARIXModel(IDModel):
 
 
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:
-        return FeaturePipeline(features=[HolidayFeature()],
+        return FeaturePipeline(features=[],
                                initial_feat_names=["inc_trans_cs"] + self.model_config.x)
 
 
     def _fit_and_predict(self, df: pd.DataFrame, feat_names: list[str], run_config: RunConfig) -> pd.DataFrame:
         """Fit SARIX and return quantile predictions in long format (inc_trans_cs space)."""
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
-
-        # also need xmas_spike covariate (added by HolidayFeature but not in feat_names)
-        if "xmas_spike" in df.columns:
-            xy_colnames = ["xmas_spike"] + [c for c in xy_colnames if c != "xmas_spike"]
-            xy_colnames = self.model_config.x + ["inc_trans_cs"]  # reset; xmas_spike handled via x param
 
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
         batched_xy = df[xy_colnames].values.reshape(

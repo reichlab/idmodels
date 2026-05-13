@@ -6,21 +6,24 @@ import pytest
 
 from idmodels.features import (
     FeaturePipeline,
+    HolidayFeature,
     HorizonTargetFeature,
     LagFeature,
     LevelFeatureFilter,
     OneHotEncodingFeature,
+    RollingMeanFeature,
+    TaylorFeature,
 )
 
 
-def make_df(n_weeks=20, locations=("01", "06", "36"), seed=0):
+def make_df(n_weeks=20, locations=("01", "06", "36"), seed=0, season="2023-24"):
     rng = np.random.default_rng(seed)
     rows = []
     for loc in locations:
         for week in range(1, n_weeks + 1):
             rows.append({"source": "nhsn",
                          "location": loc,
-                         "season": "2023-24",
+                         "season": season,
                          "season_week": week,
                          "wk_end_date": pd.Timestamp("2023-10-01") + pd.Timedelta(weeks=week - 1),
                          "inc_trans_cs": rng.normal(0.0, 0.5), })
@@ -180,3 +183,105 @@ class TestFeaturePipeline:
         df_out, feat_names = pipeline.apply(df.copy())
         assert "inc_trans_cs_lag1" in feat_names
         assert "inc_trans_cs_lag2" in feat_names
+
+
+    def test_empty_features_list(self):
+        """An empty pipeline should return df and initial_feat_names unchanged."""
+        df = make_df()
+        pipeline = FeaturePipeline(features=[], initial_feat_names=["inc_trans_cs"])
+        df_out, feat_names = pipeline.apply(df.copy())
+        assert feat_names == ["inc_trans_cs"]
+        assert len(df_out) == len(df)
+
+
+class TestHolidayFeature:
+    def test_adds_delta_xmas_column(self):
+        df = make_df(season="2022/23")
+        df_out, _ = HolidayFeature().apply(df.copy(), [])
+        assert "delta_xmas" in df_out.columns
+
+
+    def test_adds_to_feat_names(self):
+        df = make_df(season="2022/23")
+        _, feat_names = HolidayFeature().apply(df.copy(), ["inc_trans_cs"])
+        assert "delta_xmas" in feat_names
+        assert "inc_trans_cs" in feat_names
+
+
+    def test_delta_xmas_value_is_season_week_minus_xmas_week(self):
+        from iddata.utils import get_holidays
+        season = "2022/23"
+        xmas_week = (get_holidays()
+                     .query("holiday == 'Christmas Day' and season == @season")
+                     ["season_week"].iloc[0])
+        test_week = 10
+        df = pd.DataFrame([{"source": "nhsn", "location": "01", "season": season,
+                             "season_week": test_week,
+                             "wk_end_date": pd.Timestamp("2023-01-07"),
+                             "inc_trans_cs": 0.5}])
+        df_out, _ = HolidayFeature().apply(df, [])
+        assert df_out["delta_xmas"].iloc[0] == test_week - xmas_week
+
+
+    def test_does_not_add_xmas_spike(self):
+        df = make_df(season="2022/23")
+        df_out, _ = HolidayFeature().apply(df.copy(), [])
+        assert "xmas_spike" not in df_out.columns
+
+
+class TestTaylorFeature:
+    def test_adds_columns_to_df(self):
+        df = make_df()
+        feat = TaylorFeature(column="inc_trans_cs", degree=2, window_sizes=[4])
+        cols_before = set(df.columns)
+        df_out, _ = feat.apply(df.copy(), [])
+        assert len(set(df_out.columns) - cols_before) > 0
+
+
+    def test_updates_feat_names(self):
+        df = make_df()
+        feat = TaylorFeature(column="inc_trans_cs", degree=2, window_sizes=[4])
+        _, feat_names = feat.apply(df.copy(), ["inc_trans_cs"])
+        taylor_feats = [f for f in feat_names if "taylor" in f]
+        # degree 2 produces 3 coefficients (c0, c1, c2) for one window size
+        assert len(taylor_feats) == 3
+
+
+    def test_multiple_window_sizes_produce_more_features(self):
+        df = make_df()
+        feat_one = TaylorFeature(column="inc_trans_cs", degree=1, window_sizes=[3])
+        feat_two = TaylorFeature(column="inc_trans_cs", degree=1, window_sizes=[3, 5])
+        _, names_one = feat_one.apply(df.copy(), [])
+        _, names_two = feat_two.apply(df.copy(), [])
+        assert len(names_two) == 2 * len(names_one)
+
+
+class TestRollingMeanFeature:
+    def test_adds_rollmean_columns(self):
+        df = make_df()
+        feat = RollingMeanFeature(column="inc_trans_cs", window_sizes=[2, 4])
+        df_out, _ = feat.apply(df.copy(), [])
+        assert "inc_trans_cs_rollmean_w2" in df_out.columns
+        assert "inc_trans_cs_rollmean_w4" in df_out.columns
+
+
+    def test_updates_feat_names(self):
+        df = make_df()
+        feat = RollingMeanFeature(column="inc_trans_cs", window_sizes=[2, 4])
+        _, feat_names = feat.apply(df.copy(), ["inc_trans_cs"])
+        assert "inc_trans_cs_rollmean_w2" in feat_names
+        assert "inc_trans_cs_rollmean_w4" in feat_names
+        assert "inc_trans_cs" in feat_names
+
+
+    def test_default_group_columns(self):
+        feat = RollingMeanFeature(column="inc_trans_cs", window_sizes=[2])
+        assert feat.group_columns == ["location"]
+
+
+    def test_produces_valid_non_nan_values(self):
+        df = make_df(n_weeks=20, locations=("01",))
+        feat = RollingMeanFeature(column="inc_trans_cs", window_sizes=[2])
+        df_out, _ = feat.apply(df.copy(), [])
+        non_nan = df_out["inc_trans_cs_rollmean_w2"].notna()
+        assert non_nan.sum() > len(df_out) * 0.8

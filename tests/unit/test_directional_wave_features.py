@@ -243,6 +243,52 @@ def test_create_directional_wave_features_feature_count():
     assert len(feat_names) == 20
 
 
+def test_all_nan_inc_trans_cs_gives_nan_wave_features():
+    """When all inc_trans_cs values are NaN, _weighted_avg should return NaN for every row."""
+    df = create_test_dataframe()
+    df["inc_trans_cs"] = np.nan
+
+    df_result, feat_names = DirectionalWaveFeature(
+        directions=["N"],
+        temporal_lags=[],
+        max_distance_km=5000,
+        include_velocity=False,
+        include_aggregate=False,
+    ).apply(df, [])
+
+    assert "inc_trans_cs_wave_N" in feat_names
+    assert df_result["inc_trans_cs_wave_N"].isna().all()
+
+
+def test_velocity_without_lag1_in_temporal_lags():
+    """velocity is computed correctly when temporal_lags doesn't include 1 (lag1 created internally)."""
+    df = create_test_dataframe()
+
+    df_result, feat_names = DirectionalWaveFeature(
+        directions=["N"],
+        temporal_lags=[2],  # lag1 deliberately excluded
+        max_distance_km=5000,
+        include_velocity=True,
+        include_aggregate=False,
+    ).apply(df, [])
+
+    assert "inc_trans_cs_wave_N_velocity" in feat_names
+    # lag1 was created internally for velocity but should NOT be exposed in feat_names
+    assert "inc_trans_cs_wave_N_lag1" not in feat_names
+    # lag1 column exists in df (needed for velocity calculation)
+    assert "inc_trans_cs_wave_N_lag1" in df_result.columns
+
+    # Velocity semantics: base - lag1 wherever both are non-NaN
+    for loc in df_result["location"].unique():
+        loc_data = df_result[df_result["location"] == loc].sort_values("wk_end_date").reset_index(drop=True)
+        for i in range(len(loc_data)):
+            base = loc_data.loc[i, "inc_trans_cs_wave_N"]
+            lag1 = loc_data.loc[i, "inc_trans_cs_wave_N_lag1"]
+            vel = loc_data.loc[i, "inc_trans_cs_wave_N_velocity"]
+            if not (pd.isna(base) or pd.isna(lag1) or pd.isna(vel)):
+                assert abs(vel - (base - lag1)) < 1e-10
+
+
 def test_create_directional_wave_features_no_neighbors():
     """Test behavior when locations have no neighbors in a direction."""
     df = pd.DataFrame([

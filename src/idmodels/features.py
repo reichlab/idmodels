@@ -53,10 +53,7 @@ class OneHotEncodingFeature(Feature):
 
 
 class HolidayFeature(Feature):
-    """
-    Adds delta_xmas (signed distance from Christmas week) and xmas_spike.
-    Only delta_xmas is added to feat_names; xmas_spike is a covariate.
-    """
+    """Adds delta_xmas (signed distance in weeks from Christmas) to df and feat_names."""
 
 
     def apply(self, df: pd.DataFrame, feat_names: list[str]) -> tuple[pd.DataFrame, list[str]]:
@@ -68,7 +65,6 @@ class HolidayFeature(Feature):
             how="left",
             on="season",
         ).assign(delta_xmas=lambda x: x["season_week"] - x["xmas_week"])
-        df["xmas_spike"] = np.maximum(3 - np.abs(df["delta_xmas"]), 0)
         feat_names = feat_names + ["delta_xmas"]
         return df, feat_names
 
@@ -230,7 +226,26 @@ class LevelFeatureFilter(Feature):
 
 
 class DirectionalWaveFeature(Feature):
-    """Spatial wave propagation features: inverse-distance-weighted neighbor averages."""
+    """
+    Spatial wave propagation features based on directional neighbor averages.
+
+    For each direction in `directions`, computes an inverse-distance-weighted average
+    of `inc_trans_cs` from neighbors in that direction within `max_distance_km`. Also
+    supports an omnidirectional aggregate feature and temporal lags.
+
+    Parameters
+    ----------
+    directions : list[str]
+        Cardinal directions to compute wave features for (subset of {"N", "S", "E", "W"}).
+    temporal_lags : list[int]
+        Number of weeks to lag each base directional feature.
+    max_distance_km : float
+        Maximum neighbor distance (km) to include in weighted averages.
+    include_velocity : bool
+        If True, adds a velocity feature (current minus lag-1) for each base feature.
+    include_aggregate : bool
+        If True, adds an omnidirectional weighted-average feature (``inc_trans_cs_wave_avg``).
+    """
 
 
     def __init__(
