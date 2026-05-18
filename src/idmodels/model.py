@@ -8,7 +8,6 @@ from iddata.sources.base import DataSource as IdDataSource
 
 # Import SourceType from iddata via the re-export in config
 from idmodels.config import ModelConfig, PowerTransform, RunConfig, SourceType
-from idmodels.constants import NHSN_INCIDENCE_SHIFT
 from idmodels.features import FeaturePipeline
 from idmodels.transforms import (
     CenterScaleTransform,
@@ -83,11 +82,10 @@ class IDModel(ABC):
 
     def _build_transform(self) -> Transform:
         """Default: ComposedTransform([power_transform, CenterScaleTransform()])."""
-        additive_shift = NHSN_INCIDENCE_SHIFT if SourceType.NHSN in self.model_config.sources else 0.0
         if self.model_config.power_transform == PowerTransform.FOURTH_ROOT:
-            power_t: Transform = FourthRootTransform(additive_shift=additive_shift)
+            power_t: Transform = FourthRootTransform()
         else:
-            power_t = IdentityTransform(additive_shift=additive_shift)
+            power_t = IdentityTransform()
         return ComposedTransform([power_t, CenterScaleTransform()])
 
 

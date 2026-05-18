@@ -48,6 +48,16 @@ class TestOneHotEncodingFeature:
         assert "source_nhsn" in feat_names
 
 
+    def test_multiple_columns_both_appear_in_feat_names_and_df(self):
+        df = make_df(season="2023-24")
+        feat = OneHotEncodingFeature(columns=["source", "season"])
+        df_out, feat_names = feat.apply(df.copy(), [])
+        assert "source_nhsn" in feat_names
+        assert "source_nhsn" in df_out.columns
+        assert "season_2023-24" in feat_names
+        assert "season_2023-24" in df_out.columns
+
+
 class TestLagFeature:
     def test_creates_lag_columns(self):
         df = make_df()

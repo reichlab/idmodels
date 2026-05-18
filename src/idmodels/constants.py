@@ -1,5 +1,3 @@
-NHSN_INCIDENCE_SHIFT: float = 0.75 ** 4  # ≈ 0.316
-
 POWER_TRANSFORM_OFFSET: float = 0.01
 
 IN_SEASON_WEEK_MIN: int = 10

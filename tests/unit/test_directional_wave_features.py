@@ -211,22 +211,6 @@ def test_create_directional_wave_features_missing_coordinates():
                                ).apply(df, [])
 
 
-def test_create_directional_wave_features_default_config():
-    """Test that default configuration values work."""
-    df = create_test_dataframe()
-
-    _, feat_names = DirectionalWaveFeature(directions=["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
-                                           temporal_lags=[1, 2],
-                                           max_distance_km=1000,
-                                           include_velocity=False,
-                                           include_aggregate=True,
-                                           ).apply(df, [])
-
-    assert len([f for f in feat_names if "lag" not in f and "velocity" not in f]) == 9  # 8 directions + avg
-
-    assert any("lag1" in f for f in feat_names)
-    assert any("lag2" in f for f in feat_names)
-
 
 def test_create_directional_wave_features_feature_count():
     """Test that the correct number of features is generated."""

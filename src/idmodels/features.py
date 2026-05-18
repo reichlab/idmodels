@@ -1,4 +1,5 @@
 import fnmatch
+import warnings
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -6,7 +7,7 @@ import pandas as pd
 from iddata.utils import get_holidays
 from timeseriesutils import featurize
 
-from idmodels.spatial_utils import get_directional_neighbors, get_location_centroids, validate_wave_directions
+from idmodels.spatial_utils import get_directional_neighbors, get_location_centroids, haversine_distance, validate_wave_directions
 
 
 class Feature(ABC):
@@ -203,6 +204,10 @@ class HorizonTargetFeature(Feature):
                 }
             ],
         )
+        # delta_target and feat_names filtering are bundled here to enforce the FeaturePipeline
+        # contract and prevent callers from accidentally omitting delta_target. An argument could
+        # be made for splitting them out: delta_target is a training target, not a feature, and
+        # its construction inside a class named HorizonTargetFeature conflates two concerns.
         df["delta_target"] = df[self.column + "_target"] - df[self.column]
         feat_names = feat_names + [f for f in new_feat_names if f == "horizon"]
         return df, feat_names
@@ -302,14 +307,13 @@ class DirectionalWaveFeature(Feature):
                 )
 
         # Precompute all-direction neighbors for aggregate feature
-        all_neighbor_cache: dict = {}
         if self.include_aggregate:
-            from idmodels.spatial_utils import haversine_distance
+            all_neighbor_cache: dict = {}
             for loc in locations_in_df:
                 neighbors = [(other_loc, haversine_distance(location_coords[loc], coord))
                              for other_loc, coord in location_coords.items()
                              if other_loc != loc]
-                neighbors = [(loc, dist) for loc, dist in neighbors if dist <= self.max_distance_km]
+                neighbors = [(nloc, dist) for nloc, dist in neighbors if dist <= self.max_distance_km]
                 neighbors.sort(key=lambda x: x[1])
                 all_neighbor_cache[loc] = neighbors
 
@@ -334,14 +338,22 @@ class DirectionalWaveFeature(Feature):
         # Base directional features
         for direction in self.directions:
             feat_name = f"inc_trans_cs_wave_{direction}"
-            wave_features[feat_name] = [_weighted_avg(neighbor_cache[row["location"]][direction], row["wk_end_date"])
-                                        for _, row in df_sorted.iterrows()]
+            feat_values = []
+            for _, row in df_sorted.iterrows():
+                loc = row["location"]
+                date = row["wk_end_date"]
+                neighbors = neighbor_cache[loc][direction]
+                feat_values.append(_weighted_avg(neighbors, date))
+            wave_features[feat_name] = feat_values
 
         # Aggregate feature
         if self.include_aggregate:
-            wave_features["inc_trans_cs_wave_avg"] = [
-                _weighted_avg(all_neighbor_cache[row["location"]], row["wk_end_date"])
-                for _, row in df_sorted.iterrows()]
+            feat_values = []
+            for _, row in df_sorted.iterrows():
+                loc = row["location"]
+                date = row["wk_end_date"]
+                feat_values.append(_weighted_avg(all_neighbor_cache[loc], date))
+            wave_features["inc_trans_cs_wave_avg"] = feat_values
 
         for feat_name, vals in wave_features.items():
             df_sorted[feat_name] = vals
@@ -359,6 +371,8 @@ class DirectionalWaveFeature(Feature):
             for feat_name in base_feat_names:
                 lag1 = f"{feat_name}_lag1"
                 if lag1 not in df_sorted.columns:
+                    warnings.warn(f"include_velocity=True: adding extra column '{lag1}' (not in temporal_lags) to "
+                                  f"compute velocity.")
                     df_sorted[lag1] = df_sorted.groupby("location")[feat_name].shift(1)
                 df_sorted[f"{feat_name}_velocity"] = df_sorted[feat_name] - df_sorted[lag1]
 

@@ -1,10 +1,12 @@
 import datetime
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy
 import pandas as pd
 import pytest
 from iddata.enums import Disease
+from pandas.testing import assert_frame_equal
 
 from idmodels.config import (
     PoolingStrategy,
@@ -33,13 +35,10 @@ def test_sarix_nhsn(tmp_path):
 
     actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
                             f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
-
-    assert len(actual_df) > 0
-    assert set(actual_df["location"].unique()) == set(fips_codes)
-    assert all(actual_df["output_type"] == "quantile")
-    assert set(actual_df["output_type_id"].astype(str).unique()) == set(run_config.q_labels)
-    assert actual_df["value"].notna().all()
-    assert (actual_df["value"] >= 0).all()
+    expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
+                              f"UMass-{model_config.model_name}" /
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
+    assert_frame_equal(actual_df, expected_df)
 
 
 @pytest.mark.parametrize("fips_codes, nci_ids", [
@@ -55,10 +54,13 @@ def test_sarix_nssp(tmp_path, fips_codes, nci_ids):
 
     if (fips_codes != []) & (nci_ids == []):
         locs_len = 3
+        agg_level = "state"
     elif (fips_codes == []) & (nci_ids != []):
         locs_len = 3
+        agg_level = "hsa"
     else:
         locs_len = 6
+        agg_level = "both"
 
     with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()[:, 0:locs_len, :]):
         model = SARIXModel(model_config)
@@ -66,14 +68,10 @@ def test_sarix_nssp(tmp_path, fips_codes, nci_ids):
 
     actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
                             f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
-
-    expected_locs = set(fips_codes) | set(nci_ids)
-    assert len(actual_df) > 0
-    assert set(actual_df["location"].astype(str).unique()) == expected_locs
-    assert all(actual_df["output_type"] == "quantile")
-    assert set(actual_df["output_type_id"].astype(str).unique()) == set(run_config.q_labels)
-    assert actual_df["value"].notna().all()
-    assert (actual_df["value"] >= 0).all()
+    expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
+                              f"UMass-{model_config.model_name}" /
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-{agg_level}.csv")
+    assert_frame_equal(actual_df, expected_df)
 
 
 def test_sarix_shared_sigma_pooling_multiple_batches(tmp_path):
