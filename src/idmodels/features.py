@@ -243,7 +243,7 @@ class DirectionalWaveFeature(Feature):
     directions : list[str]
         Cardinal directions to compute wave features for (subset of {"N", "S", "E", "W"}).
     temporal_lags : list[int]
-        Number of weeks to lag each base directional feature.
+        List of weeks to lag each base directional feature.
     max_distance_km : float
         Maximum neighbor distance (km) to include in weighted averages.
     include_velocity : bool
