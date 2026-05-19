@@ -6,21 +6,20 @@ import lightgbm
 import numpy
 import pandas as pd
 import pytest
-from iddata.enums import Disease
 from pandas.testing import assert_frame_equal
 
-from idmodels.config import GBQRModelConfig, PowerTransform, RunConfig, SourceType
+from idmodels.config import GBQRModelConfig, PowerTransform, SourceType
 from idmodels.gbqr import GBQRModel
 
 
-def test_gbqr_nhsn(tmp_path):
+def test_gbqr_nhsn(make_run_config):
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05", "06", "08", "09", "10", "11", "12", "13", "15", "16", "17", "18", "19",
                   "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36",
                   "37", "38", "39", "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "53", "54", "55",
                   "56", "72"]
     model_config = create_test_gbqr_model_config(sources=[SourceType.FLUSURVNET, SourceType.NHSN, SourceType.ILINET])
-    run_config = create_test_gbqr_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
     with patch.object(lightgbm.sklearn.LGBMModel, "predict", return_value=_predictions_val()):
@@ -39,10 +38,10 @@ def test_gbqr_nhsn(tmp_path):
     ([], ["1", "25", "99"]),  # hsas only
     (["US", "01", "25"], ["1", "25", "99"])  # both
 ])
-def test_gbqr_nssp(tmp_path, fips_codes, nci_ids):
+def test_gbqr_nssp(make_run_config, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-11-22")
     model_config = create_test_gbqr_model_config(sources=[SourceType.NSSP])
-    run_config = create_test_gbqr_run_config(ref_date=date, states=fips_codes, hsas=nci_ids, tmp_path=tmp_path)
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=nci_ids)
 
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
     if (fips_codes != []) & (nci_ids == []):
@@ -99,18 +98,6 @@ def create_test_gbqr_model_config(sources):
     )
     return model_config
 
-
-def create_test_gbqr_run_config(ref_date, states, hsas, tmp_path):
-    run_config = RunConfig(disease=Disease.FLU,
-                           ref_date=ref_date,
-                           output_root=tmp_path / "model-output",
-                           artifact_store_root=tmp_path / "artifact-store",
-                           states=states,
-                           hsas=hsas,
-                           max_horizon=3,
-                           q_levels=[0.025, 0.50, 0.975],
-                           q_labels=["0.025", "0.5", "0.975"])
-    return run_config
 
 
 def _predictions_val():
