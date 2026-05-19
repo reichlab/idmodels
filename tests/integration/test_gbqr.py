@@ -7,10 +7,9 @@ import numpy
 import pandas as pd
 import pytest
 from iddata.enums import Disease
-from pandas.testing import assert_frame_equal
-
 from idmodels.config import GBQRModelConfig, PowerTransform, RunConfig, SourceType
 from idmodels.gbqr import GBQRModel
+from pandas.testing import assert_frame_equal
 
 
 def test_gbqr_nhsn(tmp_path):

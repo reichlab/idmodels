@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-
 from idmodels.config import GBQRModelConfig, PowerTransform, SourceType
 from idmodels.features import (
     DirectionalWaveFeature,

@@ -7,7 +7,12 @@ import pandas as pd
 from iddata.utils import get_holidays
 from timeseriesutils import featurize
 
-from idmodels.spatial_utils import get_directional_neighbors, get_location_centroids, haversine_distance, validate_wave_directions
+from idmodels.spatial_utils import (
+    get_directional_neighbors,
+    get_location_centroids,
+    haversine_distance,
+    validate_wave_directions,
+)
 
 
 class Feature(ABC):
