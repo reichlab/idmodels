@@ -52,6 +52,9 @@ idmodels = ["data/*.csv", "data/*.md"]
 line-length = 120
 lint.extend-select = ["I", "Q"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["idmodels"]
+
 [tool.ruff.lint.flake8-quotes]
 inline-quotes = "double"
 

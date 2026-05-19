@@ -3,6 +3,7 @@
 import warnings
 
 import pytest
+
 from idmodels.spatial_utils import (
     DIRECTION_ANGLES,
     compute_bearing,

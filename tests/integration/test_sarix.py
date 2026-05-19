@@ -6,6 +6,8 @@ import numpy
 import pandas as pd
 import pytest
 from iddata.enums import Disease
+from pandas.testing import assert_frame_equal
+
 from idmodels.config import (
     PoolingStrategy,
     PowerTransform,
@@ -15,7 +17,6 @@ from idmodels.config import (
     SourceType,
 )
 from idmodels.sarix import SARIXFourierModel, SARIXModel
-from pandas.testing import assert_frame_equal
 
 
 def test_sarix_nhsn(tmp_path):
