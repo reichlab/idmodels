@@ -322,6 +322,7 @@ class DirectionalWaveFeature(Feature):
                 neighbors.sort(key=lambda x: x[1])
                 all_neighbor_cache[loc] = neighbors
 
+        # Sort dataframe by location and date for efficient processing
         df_sorted = df.sort_values(["location", "wk_end_date"]).reset_index(drop=True)
         wave_features: dict = {}
 
@@ -360,6 +361,7 @@ class DirectionalWaveFeature(Feature):
                 feat_values.append(_weighted_avg(all_neighbor_cache[loc], date))
             wave_features["inc_trans_cs_wave_avg"] = feat_values
 
+        # Add base features to dataframe
         for feat_name, vals in wave_features.items():
             df_sorted[feat_name] = vals
 
@@ -381,8 +383,10 @@ class DirectionalWaveFeature(Feature):
                     df_sorted[lag1] = df_sorted.groupby("location")[feat_name].shift(1)
                 df_sorted[f"{feat_name}_velocity"] = df_sorted[feat_name] - df_sorted[lag1]
 
+        # Restore original index order
         df_sorted = df_sorted.sort_index()
 
+        # Collect all feature names
         wave_feat_names = list(base_feat_names)
         wave_feat_names += [f"{fn}_lag{lag}" for fn in base_feat_names for lag in self.temporal_lags]
         if self.include_velocity:

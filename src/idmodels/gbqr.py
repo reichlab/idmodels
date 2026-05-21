@@ -42,6 +42,7 @@ class GBQRModel(IDModel):
                       SourceType.NSSP: NSSPDataSource(disease=run_config.disease),
                       SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
                       SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj)}
+        # Check if both nhsn and nssp data are included as sources
         if SourceType.NHSN in self.model_config.sources and SourceType.NSSP in self.model_config.sources:
             raise ValueError("Only one of NHSN or NSSP may be selected.")
 
@@ -56,6 +57,7 @@ class GBQRModel(IDModel):
 
         features = []
 
+        # Create directional wave features if enabled
         if self.model_config.use_directional_waves:
             features.append(
                 DirectionalWaveFeature(
@@ -86,12 +88,16 @@ class GBQRModel(IDModel):
 
     def _fit_and_predict(self, df: pd.DataFrame, feat_names: list[str], run_config: RunConfig) -> pd.DataFrame:
         """Fit bagged LightGBM and return long-format predictions in inc_trans_cs space."""
+        # keep only rows that are in-season
         if run_config.disease in (Disease.FLU, Disease.RSV):
             df = df.query("season_week >= 5 and season_week <= 45")
 
+        # "test set" df used to generate look-ahead predictions
         df_test = df.loc[df.wk_end_date == df.wk_end_date.max()].copy()
+        # "train set" df for model fitting; target value non-missing
         df_train = df.loc[~df["delta_target"].isna().values]
 
+        # train model and obtain test set predictions
         if self.model_config.fit_locations_separately:
             unique_ids = df_test["unique_id"].unique()
             preds_df = pd.concat(
@@ -106,19 +112,26 @@ class GBQRModel(IDModel):
 
 
     def _train_gbq_and_predict(self, run_config, df_train, df_test, feat_names, unique_id=None):
+        # filter to location if necessary
         if unique_id is not None:
             df_test = df_test.query(f'unique_id == "{unique_id}"')
             df_train = df_train.query(f'unique_id == "{unique_id}"')
 
+        # get x and y
         x_test = df_test[feat_names]
         x_train = df_train[feat_names]
         y_train = df_train["delta_target"]
 
+        # test set predictions:
+        # same number of rows as df_test, one column per quantile level
         test_pred_qs_df = self._get_test_quantile_predictions(run_config, df_train, x_train, y_train, x_test)
 
+        # add predictions to original test df
         df_test.reset_index(drop=True, inplace=True)
         df_test_w_preds = pd.concat([df_test, test_pred_qs_df], axis=1)
 
+        # melt to get columns into rows, keeping only the things we need to invert data
+        # transforms later on
         cols_to_keep = ["source", "agg_level", "location", "wk_end_date", "pop", "inc_trans_cs", "horizon",
                         "inc_trans_center_factor", "inc_trans_scale_factor"]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
@@ -140,21 +153,26 @@ class GBQRModel(IDModel):
 
 
     def _get_test_quantile_predictions(self, run_config, df_train, x_train, y_train, x_test):
+        # seed for random number generation, based on reference date
         rng_seed = int(calendar.timegm(run_config.ref_date.timetuple()))
         rng = np.random.default_rng(seed=rng_seed)
+        # seeds for lgb model fits, one per combination of bag and quantile level
         lgb_seeds = rng.integers(1e8, size=(self.model_config.num_bags, len(run_config.q_levels)))
 
         test_preds_by_bag = np.empty((x_test.shape[0], self.model_config.num_bags, len(run_config.q_levels)))
         train_seasons = df_train["season"].unique()
         feat_importance = []
 
+        # training loop over bags
         for b in tqdm(range(self.model_config.num_bags), "Bag number"):
+            # get indices of observations that are in bag
             bag_seasons = rng.choice(train_seasons,
                                      size=int(len(train_seasons) * self.model_config.bag_frac_samples),
                                      replace=False)
             bag_obs_inds = df_train["season"].isin(bag_seasons)
 
             for q_ind, q_level in enumerate(run_config.q_levels):
+                # fit to bag
                 model = lgb.LGBMRegressor(verbosity=-1,
                                           objective="quantile",
                                           alpha=q_level,
@@ -165,8 +183,10 @@ class GBQRModel(IDModel):
                                                      "importance": model.feature_importances_,
                                                      "b": b,
                                                      "q_level": q_level}))
+                # test set predictions
                 test_preds_by_bag[:, b, q_ind] = model.predict(X=x_test)
 
+        # combine and save feature importance scores
         if self.model_config.save_feat_importance:
             feat_importance_df = pd.concat(feat_importance, axis=0)
             save_path = build_save_path(root=run_config.artifact_store_root,
@@ -175,7 +195,9 @@ class GBQRModel(IDModel):
                                         subdir="feat_importance")
             feat_importance_df.to_csv(save_path, index=False)
 
+        # combined predictions across bags: median
         test_pred_qs = np.median(test_preds_by_bag, axis=1)
+        # test predictions as a data frame, one column per quantile level
         test_pred_qs_df = pd.DataFrame(test_pred_qs)
         test_pred_qs_df.columns = run_config.q_labels
         return test_pred_qs_df

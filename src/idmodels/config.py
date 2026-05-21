@@ -79,6 +79,7 @@ class GBQRModelConfig(ModelConfig):
     reporting_adj: bool = False
     save_feat_importance: bool = False
 
+    # directional wave features (disabled by default)
     use_directional_waves: bool = False
     wave_directions: list[str] = field(default_factory=lambda: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
     wave_temporal_lags: list[int] = field(default_factory=lambda: [1, 2])

@@ -9,6 +9,7 @@ from idmodels.features import DirectionalWaveFeature
 
 def create_test_dataframe():
     """Create a simple test dataframe with synthetic data."""
+    # Create 3 locations over 5 time points
     dates = pd.date_range("2024-01-01", periods=5, freq="W")
     locations = ["01", "06", "36"]  # Alabama, California, New York
 
@@ -35,6 +36,7 @@ def test_create_directional_wave_features_basic():
                                                    include_aggregate=False,
                                                    ).apply(df, [])
 
+    # Should have base features + lag1 for each direction
     expected_feats = ["inc_trans_cs_wave_N",
                       "inc_trans_cs_wave_S",
                       "inc_trans_cs_wave_N_lag1",
@@ -42,6 +44,7 @@ def test_create_directional_wave_features_basic():
 
     assert set(feat_names) == set(expected_feats)
 
+    # Check that features were added to dataframe
     for feat in feat_names:
         assert feat in df_result.columns
 
@@ -57,6 +60,7 @@ def test_create_directional_wave_features_all_directions():
                                            include_aggregate=False,
                                            ).apply(df, [])
 
+    # Should have 8 base features (one per direction)
     assert len(feat_names) == 8
 
     for direction in ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]:
@@ -74,6 +78,7 @@ def test_create_directional_wave_features_with_aggregate():
                                            include_aggregate=True,
                                            ).apply(df, [])
 
+    # Should have N, S, and avg
     assert "inc_trans_cs_wave_N" in feat_names
     assert "inc_trans_cs_wave_S" in feat_names
     assert "inc_trans_cs_wave_avg" in feat_names
@@ -90,6 +95,7 @@ def test_create_directional_wave_features_with_lags():
                                            include_aggregate=False,
                                            ).apply(df, [])
 
+    # Should have base + lag1 + lag2
     expected_feats = ["inc_trans_cs_wave_N",
                       "inc_trans_cs_wave_N_lag1",
                       "inc_trans_cs_wave_N_lag2"]
@@ -108,12 +114,15 @@ def test_create_directional_wave_features_with_velocity():
                                                    include_aggregate=False,
                                                    ).apply(df, [])
 
+    # Should have base + lag1 + velocity
     assert "inc_trans_cs_wave_N" in feat_names
     assert "inc_trans_cs_wave_N_lag1" in feat_names
     assert "inc_trans_cs_wave_N_velocity" in feat_names
 
+    # Check that velocity is computed correctly (current - lag1)
     for loc in df_result["location"].unique():
         loc_data = df_result[df_result["location"] == loc].reset_index(drop=True)
+        # For locations with enough history
         for i in range(1, len(loc_data)):
             base_val = loc_data.loc[i, "inc_trans_cs_wave_N"]
             lag1_val = loc_data.loc[i, "inc_trans_cs_wave_N_lag1"]
@@ -135,12 +144,15 @@ def test_create_directional_wave_features_lag_semantics():
                                           include_aggregate=False,
                                           ).apply(df, [])
 
+    # Check lag semantics for one location
     loc_data = df_result[df_result["location"] == "01"].sort_values("wk_end_date").reset_index(drop=True)
 
+    # At index i, lag1 should equal base value at index i-1
     for i in range(1, len(loc_data)):
         base_prev = loc_data.loc[i - 1, "inc_trans_cs_wave_N"]
         lag1_curr = loc_data.loc[i, "inc_trans_cs_wave_N_lag1"]
 
+        # If both exist and are not NaN, they should match
         if not pd.isna(base_prev) and not pd.isna(lag1_curr):
             assert abs(base_prev - lag1_curr) < 1e-6
 
@@ -157,6 +169,7 @@ def test_create_directional_wave_features_preserves_index():
                                           include_aggregate=False,
                                           ).apply(df, [])
 
+    # Index should be preserved
     assert df_result.index.tolist() == original_index
 
 
@@ -177,6 +190,7 @@ def test_create_directional_wave_features_multiple_agg_levels():
     """Test that multiple agg_levels raise ValueError."""
     df = create_test_dataframe()
 
+    # Add a row with different agg_level
     df.loc[len(df)] = {"location": "01001",
                        "wk_end_date": pd.Timestamp("2024-01-01"),
                        "inc_trans_cs": 0.5,
@@ -196,6 +210,7 @@ def test_create_directional_wave_features_missing_coordinates():
     """Test that missing coordinates raise ValueError."""
     df = create_test_dataframe()
 
+    # Add a location without coordinates
     df.loc[len(df)] = {"location": "FAKE99",
                        "wk_end_date": pd.Timestamp("2024-01-01"),
                        "inc_trans_cs": 0.5,
@@ -287,10 +302,11 @@ def test_create_directional_wave_features_no_neighbors():
 
     df_result, feat_names = DirectionalWaveFeature(directions=["N"],
                                                    temporal_lags=[],
-                                                   max_distance_km=10,
+                                                   max_distance_km=10,  # Very small distance - no neighbors
                                                    include_velocity=False,
                                                    include_aggregate=False,
                                                    ).apply(df, [])
 
     assert "inc_trans_cs_wave_N" in feat_names
+    # Feature should exist but be NaN (no neighbors)
     assert pd.isna(df_result.loc[0, "inc_trans_cs_wave_N"])

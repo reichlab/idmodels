@@ -51,6 +51,7 @@ class IDModel(ABC):
         save_path = build_save_path(root=run_config.output_root,
                                     run_config=run_config,
                                     model_config=self.model_config)
+        # Ensure output_type_id is string to avoid pandas inferring it as float when reading
         preds_df["output_type_id"] = preds_df["output_type_id"].astype(str)
         preds_df.to_csv(save_path, index=False)
 
@@ -82,6 +83,11 @@ class IDModel(ABC):
 
     def _build_transform(self) -> Transform:
         """Default: ComposedTransform([power_transform, CenterScaleTransform()])."""
+        # process response variable:
+        # - fourth root transform to stabilize variability
+        # - divide by location- and source- specific 95th percentile
+        # - center relative to location- and source- specific mean
+        #   (note non-standard order of center/scale)
         if self.model_config.power_transform == PowerTransform.FOURTH_ROOT:
             power_t: Transform = FourthRootTransform()
         else:
@@ -104,9 +110,10 @@ class IDModel(ABC):
         preds_df["value"] = np.maximum(preds_df["value"], 0.0)
 
         if SourceType.NHSN in self.model_config.sources:
+            # turn nhsn rates back into counts
             preds_df["value"] = preds_df["value"] * preds_df["pop"] / 100000
         elif SourceType.NSSP in self.model_config.sources:
-            preds_df["value"] = np.minimum(preds_df["value"] / 100, 1.0)
+            preds_df["value"] = np.minimum(preds_df["value"] / 100, 1.0)  # percentage to proportion
 
         return preds_df
 
@@ -132,6 +139,7 @@ class IDModel(ABC):
         req_cols = ["location", "reference_date", "horizon", "target_end_date",
                     "target", "output_type", "output_type_id", "value"]
 
+        # we count national as state since it is coded using the same 2-digit fips code
         preds_df["geo_level"] = np.where(
             preds_df["agg_level"] == "national", "state", preds_df["agg_level"]
         )

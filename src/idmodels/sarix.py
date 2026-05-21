@@ -26,6 +26,7 @@ class SARIXModel(IDModel):
         if not set(self.model_config.sources) <= sources_map.keys():
             raise ValueError("SARIXModel only supports NHSN and NSSP sources.")
 
+        # Check if both nhsn and nssp data are included as sources
         if SourceType.NHSN in self.model_config.sources and SourceType.NSSP in self.model_config.sources:
             raise ValueError("Only one of NHSN or NSSP may be selected.")
 
@@ -41,10 +42,12 @@ class SARIXModel(IDModel):
         """Fit SARIX and return quantile predictions in long format (inc_trans_cs space)."""
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
 
+        # missing values are interpolated when possible
         df = df.query("wk_end_date >= '2022-10-01'").interpolate()
         batched_xy = df[xy_colnames].values.reshape(
             len(df["unique_id"].unique()), -1, len(xy_colnames))
 
+        # Get any extra parameters for the SARIX constructor
         extra_params = self._get_extra_sarix_params(df)
 
         sarix_fit = sarix.SARIX(xy=batched_xy,
@@ -53,7 +56,7 @@ class SARIXModel(IDModel):
                                 P=self.model_config.P,
                                 D=self.model_config.D,
                                 season_period=self.model_config.season_period,
-                                transform="none",
+                                transform="none",  # transformations are handled outside of SARIX
                                 theta_pooling=self.model_config.theta_pooling,
                                 sigma_pooling=self.model_config.sigma_pooling,
                                 forecast_horizon=run_config.max_horizon,
@@ -106,6 +109,8 @@ class SARIXFourierModel(SARIXModel):
 
 
     def _get_extra_sarix_params(self, df: pd.DataFrame) -> dict:
+        # Extract day-of-year from dates for Fourier features
+        # Take the first location's dates (same for all locations after reshaping)
         day_of_year = (
             df.groupby("location")["wk_end_date"]
             .apply(lambda x: x.dt.dayofyear.values)

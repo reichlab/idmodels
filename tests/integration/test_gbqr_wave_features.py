@@ -19,6 +19,7 @@ from idmodels.features import (
 
 def create_realistic_test_data():
     """Create realistic test data mimicking the structure from DiseaseDataLoader."""
+    # Create data for several states over multiple weeks
     np.random.seed(42)
 
     states = ["01", "06", "13", "36", "42", "48"]  # AL, CA, GA, NY, PA, TX
@@ -27,6 +28,7 @@ def create_realistic_test_data():
     data = []
     for state in states:
         for i, date in enumerate(dates):
+            # Create somewhat realistic progression of incidence
             base_inc = 0.5 + 0.3 * np.sin(i / 10) + np.random.randn() * 0.1
 
             data.append({"agg_level": "state",
@@ -62,9 +64,11 @@ def test_gbqr_preprocessing_without_waves():
                 HorizonTargetFeature(column="inc_trans_cs", max_horizon=3)]
     df_result, feat_names = FeaturePipeline(features=features, initial_feat_names=init_feats).apply(df)
 
+    # Check that basic features are present
     assert "inc_trans_cs" in feat_names
     assert "log_pop" in feat_names
 
+    # Check that no wave features are present
     wave_feats = [f for f in feat_names if "wave" in f]
     assert len(wave_feats) == 0
 
@@ -73,6 +77,7 @@ def test_gbqr_preprocessing_with_waves_enabled():
     """Test that GBQR preprocessing works with wave features enabled."""
     df = create_realistic_test_data()
 
+    # Create directional wave features
     df_with_waves, wave_feat_names = DirectionalWaveFeature(
         directions=["N", "S", "E", "W"],
         temporal_lags=[1, 2],
@@ -81,6 +86,7 @@ def test_gbqr_preprocessing_with_waves_enabled():
         include_aggregate=True,
     ).apply(df, [])
 
+    # Check that wave features were created
     assert len(wave_feat_names) > 0
     assert "inc_trans_cs_wave_N" in wave_feat_names
     assert "inc_trans_cs_wave_S" in wave_feat_names
@@ -90,6 +96,7 @@ def test_gbqr_preprocessing_with_waves_enabled():
     assert "inc_trans_cs_wave_N_lag1" in wave_feat_names
     assert "inc_trans_cs_wave_N_lag2" in wave_feat_names
 
+    # Now pass through the full feature creation pipeline
     init_feats = ["inc_trans_cs", "log_pop"] + wave_feat_names
 
     features = [OneHotEncodingFeature(columns=["source", "agg_level", "location"]),
@@ -102,12 +109,15 @@ def test_gbqr_preprocessing_with_waves_enabled():
                 HorizonTargetFeature(column="inc_trans_cs", max_horizon=3)]
     df_result, feat_names = FeaturePipeline(features=features, initial_feat_names=init_feats).apply(df_with_waves)
 
+    # Check that all wave features are in the final feature list
     for wave_feat in wave_feat_names:
         assert wave_feat in feat_names
 
+    # Check that basic features are still present
     assert "inc_trans_cs" in feat_names
     assert "log_pop" in feat_names
 
+    # Check that targets were created
     assert "delta_target" in df_result.columns
 
 
@@ -115,6 +125,7 @@ def test_gbqr_preprocessing_with_all_wave_options():
     """Test GBQR preprocessing with all wave feature options enabled."""
     df = create_realistic_test_data()
 
+    # Create directional wave features with all options
     df_with_waves, wave_feat_names = DirectionalWaveFeature(
         directions=["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
         temporal_lags=[1, 2],
@@ -129,9 +140,11 @@ def test_gbqr_preprocessing_with_all_wave_options():
     expected_feature_count = 9 * 4
     assert len(wave_feat_names) == expected_feature_count
 
+    # Check that velocity features exist
     assert "inc_trans_cs_wave_N_velocity" in wave_feat_names
     assert "inc_trans_cs_wave_avg_velocity" in wave_feat_names
 
+    # Pass through full pipeline
     init_feats = ["inc_trans_cs", "log_pop"] + wave_feat_names
 
     features = [
@@ -146,6 +159,7 @@ def test_gbqr_preprocessing_with_all_wave_options():
     ]
     df_result, feat_names = FeaturePipeline(features=features, initial_feat_names=init_feats).apply(df_with_waves)
 
+    # All wave features should be in final feature list
     for wave_feat in wave_feat_names:
         assert wave_feat in feat_names
 
@@ -161,9 +175,12 @@ def test_gbqr_wave_features_no_nan_for_valid_data():
                                               include_aggregate=True,
                                               ).apply(df, [])
 
+    # For aggregate feature, most locations should have some neighbors
     avg_feature = df_with_waves["inc_trans_cs_wave_avg"]
+    # Check that we have at least some non-NaN values
     non_nan_count = (~avg_feature.isna()).sum()
 
+    # At least half of the values should be non-NaN (locations have neighbors)
     assert non_nan_count > len(df_with_waves) * 0.5
 
 
@@ -171,6 +188,7 @@ def test_gbqr_wave_features_with_model_config_pattern():
     """Test wave features using the model_config pattern from GBQR."""
     df = create_realistic_test_data()
 
+    # Simulate model_config with wave feature settings
     model_config = GBQRModelConfig(model_name="gbqr_wave_test",
                                    sources=[SourceType.NHSN],
                                    fit_locations_separately=False,
@@ -184,6 +202,7 @@ def test_gbqr_wave_features_with_model_config_pattern():
 
     init_feats = ["inc_trans_cs", "log_pop"]
 
+    # This is how it would be called in GBQRModel.run()
     if hasattr(model_config, "use_directional_waves") and model_config.use_directional_waves:
         df, wave_feat_names = DirectionalWaveFeature(
             directions=model_config.wave_directions,
@@ -213,6 +232,7 @@ def test_gbqr_wave_features_backwards_compatibility():
     """Test that missing wave config attributes don't break GBQR."""
     df = create_realistic_test_data()
 
+    # Model config WITHOUT wave feature settings (backwards compatibility)
     model_config = GBQRModelConfig(model_name="gbqr_no_waves",
                                    sources=[SourceType.NHSN],
                                    fit_locations_separately=False,
@@ -222,9 +242,12 @@ def test_gbqr_wave_features_backwards_compatibility():
 
     init_feats = ["inc_trans_cs", "log_pop"]
 
+    # This check should pass and not add wave features
     if hasattr(model_config, "use_directional_waves") and model_config.use_directional_waves:
+        # This block should not execute
         raise AssertionError("Should not execute wave feature code")
 
+    # Normal preprocessing should work
     features = [
         OneHotEncodingFeature(columns=["source", "agg_level", "location"]),
         HolidayFeature(),
@@ -239,6 +262,7 @@ def test_gbqr_wave_features_backwards_compatibility():
         features.append(LevelFeatureFilter())
     df_result, feat_names = FeaturePipeline(features=features, initial_feat_names=init_feats).apply(df)
 
+    # No wave features should be present
     wave_feats = [f for f in feat_names if "wave" in f]
     assert len(wave_feats) == 0
 
@@ -255,11 +279,13 @@ def test_gbqr_wave_features_lag_values_are_correct():
         include_aggregate=False,
     ).apply(df, [])
 
+    # Check lag semantics for one location
     test_location = "06"  # California
     loc_data = df_with_waves[df_with_waves["location"] == test_location] \
         .sort_values("wk_end_date") \
         .reset_index(drop=True)
 
+    # Verify lag1 at time t equals base value at time t-1
     for i in range(1, len(loc_data)):
         base_prev = loc_data.loc[i - 1, "inc_trans_cs_wave_N"]
         lag1_curr = loc_data.loc[i, "inc_trans_cs_wave_N_lag1"]
@@ -267,6 +293,7 @@ def test_gbqr_wave_features_lag_values_are_correct():
         if not pd.isna(base_prev) and not pd.isna(lag1_curr):
             assert abs(base_prev - lag1_curr) < 1e-6
 
+    # Verify lag2 at time t equals base value at time t-2
     for i in range(2, len(loc_data)):
         base_prev2 = loc_data.loc[i - 2, "inc_trans_cs_wave_N"]
         lag2_curr = loc_data.loc[i, "inc_trans_cs_wave_N_lag2"]
