@@ -8,8 +8,8 @@ from iddata.sources.base import DataSource as IdDataSource
 
 # Import SourceType from iddata via the re-export in config
 from idmodels.config import ModelConfig, PowerTransform, RunConfig, SourceType
-from idmodels.features import FeaturePipeline
 from idmodels.constants import FLUSURVNET_FLOOR, FLUSURVNET_SCALE, ILINET_FLOOR, ILINET_SCALE, NHSN_FLOOR
+from idmodels.features import FeaturePipeline
 from idmodels.transforms import (
     CenterScaleTransform,
     ComposedTransform,

@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from idmodels.constants import NHSN_FLOOR, ILINET_FLOOR, ILINET_SCALE, POWER_TRANSFORM_OFFSET
+from idmodels.constants import ILINET_FLOOR, ILINET_SCALE, NHSN_FLOOR, POWER_TRANSFORM_OFFSET
 from idmodels.transforms import (
     CenterScaleTransform,
     ComposedTransform,
