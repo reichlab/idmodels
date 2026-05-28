@@ -9,11 +9,13 @@ from iddata.sources.base import DataSource as IdDataSource
 # Import SourceType from iddata via the re-export in config
 from idmodels.config import ModelConfig, PowerTransform, RunConfig, SourceType
 from idmodels.features import FeaturePipeline
+from idmodels.constants import FLUSURVNET_FLOOR, FLUSURVNET_SCALE, ILINET_FLOOR, ILINET_SCALE, NHSN_FLOOR
 from idmodels.transforms import (
     CenterScaleTransform,
     ComposedTransform,
     FourthRootTransform,
     IdentityTransform,
+    SourceScaleTransform,
     Transform,
 )
 from idmodels.utils import build_save_path
@@ -82,17 +84,28 @@ class IDModel(ABC):
 
 
     def _build_transform(self) -> Transform:
-        """Default: ComposedTransform([power_transform, CenterScaleTransform()])."""
+        """Default: ComposedTransform([SourceScaleTransform, power_transform, CenterScaleTransform()])."""
         # process response variable:
+        # - source-specific floor and scale (NHSN: +0.316; ILINet: *4; FluSurvNet: /2.5)
         # - fourth root transform to stabilize variability
-        # - divide by location- and source- specific 95th percentile
-        # - center relative to location- and source- specific mean
+        # - divide by location- and source-specific 95th percentile
+        # - center relative to location- and source-specific mean
         #   (note non-standard order of center/scale)
+        _SOURCE_SCALE_PARAMS = {
+            SourceType.NHSN: (NHSN_FLOOR, 1.0),
+            SourceType.ILINET: (ILINET_FLOOR, ILINET_SCALE),
+            SourceType.FLUSURVNET: (FLUSURVNET_FLOOR, FLUSURVNET_SCALE),
+        }
+        source_scale_params = {
+            src.value: params
+            for src, params in _SOURCE_SCALE_PARAMS.items()
+            if src in self.model_config.sources
+        }
         if self.model_config.power_transform == PowerTransform.FOURTH_ROOT:
             power_t: Transform = FourthRootTransform()
         else:
             power_t = IdentityTransform()
-        return ComposedTransform([power_t, CenterScaleTransform()])
+        return ComposedTransform([SourceScaleTransform(source_scale_params), power_t, CenterScaleTransform()])
 
 
     def _filter_locations(self, df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:

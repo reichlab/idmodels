@@ -20,39 +20,64 @@ class Transform(ABC):
 
 
 class FourthRootTransform(Transform):
-    """f(x) = (x + additive_shift + offset)^0.25"""
+    """f(x) = (x + offset)^0.25"""
 
 
-    def __init__(self, additive_shift: float = 0.0, offset: float = POWER_TRANSFORM_OFFSET):
-        self.additive_shift = additive_shift
+    def __init__(self, offset: float = POWER_TRANSFORM_OFFSET):
         self.offset = offset
 
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
-        df["inc_trans"] = (df["inc"] + self.additive_shift + self.offset) ** 0.25
+        df["inc_trans"] = (df["inc"] + self.offset) ** 0.25
         return df
 
 
     def invert(self, values: np.ndarray, context: pd.DataFrame) -> np.ndarray:
-        return np.maximum(values, 0.0) ** 4 - self.offset - self.additive_shift
+        return np.maximum(values, 0.0) ** 4 - self.offset
 
 
 class IdentityTransform(Transform):
-    """f(x) = x + additive_shift + offset (no power transform)."""
+    """f(x) = x + offset (no power transform)"""
 
 
-    def __init__(self, additive_shift: float = 0.0, offset: float = POWER_TRANSFORM_OFFSET):
-        self.additive_shift = additive_shift
+    def __init__(self, offset: float = POWER_TRANSFORM_OFFSET):
         self.offset = offset
 
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
-        df["inc_trans"] = df["inc"] + self.additive_shift + self.offset
+        df["inc_trans"] = df["inc"] + self.offset
         return df
 
 
     def invert(self, values: np.ndarray, context: pd.DataFrame) -> np.ndarray:
-        return np.maximum(values, 0.0) - self.offset - self.additive_shift
+        return np.maximum(values, 0.0) - self.offset
+
+
+class SourceScaleTransform(Transform):
+    """
+    Applies (inc + floor) * scale per source before the power transform; inverts after.
+    params: dict mapping source name string to (floor, scale).
+    Sources absent from params pass through unchanged.
+    """
+
+
+    def __init__(self, params: dict[str, tuple[float, float]]):
+        self.params = params
+
+
+    def apply(self, df: pd.DataFrame) -> pd.DataFrame:
+        # look up per-row floor and scale by source name; sources not in params get identity defaults
+        floors = df["source"].map({k: v[0] for k, v in self.params.items()}).fillna(0.0)  # default floor: 0
+        scales = df["source"].map({k: v[1] for k, v in self.params.items()}).fillna(1.0)  # default scale: 1
+        df["inc"] = (df["inc"] + floors) * scales
+        return df
+
+
+    def invert(self, values: np.ndarray, context: pd.DataFrame) -> np.ndarray:
+        # same lookup on context["source"] to recover the per-row params used in apply()
+        floors = context["source"].map({k: v[0] for k, v in self.params.items()}).fillna(0.0).values
+        scales = context["source"].map({k: v[1] for k, v in self.params.items()}).fillna(1.0).values
+        return values / scales - floors  # inverse of (x + floor) * scale
 
 
 class CenterScaleTransform(Transform):

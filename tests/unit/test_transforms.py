@@ -3,12 +3,13 @@
 import numpy as np
 import pandas as pd
 
-from idmodels.constants import POWER_TRANSFORM_OFFSET
+from idmodels.constants import NHSN_FLOOR, ILINET_FLOOR, ILINET_SCALE, POWER_TRANSFORM_OFFSET
 from idmodels.transforms import (
     CenterScaleTransform,
     ComposedTransform,
     FourthRootTransform,
     IdentityTransform,
+    SourceScaleTransform,
 )
 
 
@@ -52,15 +53,6 @@ class TestFourthRootTransform:
         t = FourthRootTransform()
         result = t.invert(np.array([-5.0, 0.0]), pd.DataFrame())
         assert (result >= -POWER_TRANSFORM_OFFSET).all()
-
-
-    def test_additive_shift(self):
-        df = make_df()
-        shift = 0.316
-        t = FourthRootTransform(additive_shift=shift)
-        out = t.apply(df.copy())
-        expected = (df["inc"] + shift + POWER_TRANSFORM_OFFSET) ** 0.25
-        np.testing.assert_allclose(out["inc_trans"].values, expected.values)
 
 
 class TestIdentityTransform:
@@ -158,14 +150,48 @@ class TestCenterScaleTransform:
         np.testing.assert_allclose(out["inc_trans_center_factor"].iloc[0], expected_center)
 
 
+class TestSourceScaleTransform:
+    def test_apply_nhsn_floor_only(self):
+        df = make_df()
+        t = SourceScaleTransform({"nhsn": (NHSN_FLOOR, 1.0)})
+        out = t.apply(df.copy())
+        np.testing.assert_allclose(out["inc"].values, df["inc"].values + NHSN_FLOOR)
+
+
+    def test_apply_ilinet_floor_and_scale(self):
+        df = make_df()
+        df["source"] = "ilinet"
+        t = SourceScaleTransform({"ilinet": (ILINET_FLOOR, ILINET_SCALE)})
+        out = t.apply(df.copy())
+        np.testing.assert_allclose(out["inc"].values, (df["inc"].values + ILINET_FLOOR) * ILINET_SCALE)
+
+
+    def test_nssp_passthrough(self):
+        df = make_df()
+        df["source"] = "nssp"
+        t = SourceScaleTransform({})
+        out = t.apply(df.copy())
+        np.testing.assert_allclose(out["inc"].values, df["inc"].values)
+
+
+    def test_roundtrip(self):
+        df = make_df()
+        t = SourceScaleTransform({"nhsn": (NHSN_FLOOR, 1.0)})
+        out = t.apply(df.copy())
+        recovered = t.invert(out["inc"].values, out)
+        np.testing.assert_allclose(recovered, df["inc"].values, atol=1e-10)
+
+
 class TestComposedTransform:
     def test_roundtrip_fourth_root_then_center_scale(self):
         df = make_df(n_per_group=52)
-        t = ComposedTransform([FourthRootTransform(), CenterScaleTransform()])
+        t = ComposedTransform([
+            SourceScaleTransform({"nhsn": (NHSN_FLOOR, 1.0)}),
+            FourthRootTransform(),
+            CenterScaleTransform(),
+        ])
         out = t.apply(df.copy())
         assert "inc_trans_cs" in out.columns
-
-        # invert() reverses both transforms: CenterScale then FourthRoot → back to inc
         recovered_inc = t.invert(out["inc_trans_cs"].values, out)
         np.testing.assert_allclose(recovered_inc, df["inc"].values, atol=1e-10)
 
