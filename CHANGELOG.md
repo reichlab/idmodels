@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0]
+
+### Added
+- `features.py` module with composable feature engineering classes: `Feature` (abstract base), `OneHotEncodingFeature`, `HolidayFeature`, `TaylorFeature`, `RollingMeanFeature`, `LagFeature`, `HorizonTargetFeature`, `LevelFeatureFilter`, `DirectionalWaveFeature`, `FeaturePipeline`
+- `transforms.py` module with `Transform` (abstract base), `FourthRootTransform`, `IdentityTransform`, `CenterScaleTransform`, `ComposedTransform`, `SourceScaleTransform`
+- `model.py` module with `IDModel` abstract base class shared by `GBQRModel` and `SARIXModel`
+- `SourceType` exported from `idmodels` top-level (sourced from `iddata.enums`)
+- Unit tests for `HolidayFeature`, `TaylorFeature`, `RollingMeanFeature`, `CenterScaleTransform`, `FeaturePipeline` edge cases, and `SourceScaleTransform`
+- `tests/integration/conftest.py` with shared `make_run_config` pytest fixture, replacing duplicate `create_test_gbqr_run_config` and `create_test_sarix_run_config` helpers
+- `ILINET_FLOOR`, `ILINET_SCALE`, `FLUSURVNET_FLOOR`, `FLUSURVNET_SCALE` constants in `constants.py`
+
+### Changed
+- **Breaking**: `DataSource` enum removed from `idmodels`; replace with `SourceType` from `iddata.enums`
+- **Breaking**: `model_config.sources` now expects `list[SourceType]` instead of `list[DataSource]`
+- **Breaking**: `preprocess.py` replaced by `features.py`; feature engineering is now class-based via `FeaturePipeline`
+- **Breaking**: source-specific numeric pre-transforms moved from `iddata` `DataSource.load()` into `idmodels` `_build_transform()`: NHSN `+0.75**4`, ILINet `(+exp(-7))*4`, FluSurvNet `(+exp(-3))/2.5` are now applied and explicitly inverted in idmodels; predictions for ILINet and FluSurvNet now come out in original measurement units rather than a silently rescaled space
+- **Breaking**: `FourthRootTransform` and `IdentityTransform` `additive_shift` parameter removed; source-specific shifts are now handled by `SourceScaleTransform`
+- `_build_transform()` pipeline extended to `[SourceScaleTransform, power_transform, CenterScaleTransform]`
+- `ADDITIVE_SHIFT` renamed to `NHSN_FLOOR` in `constants.py`
+- `GBQRModel` and `SARIXModel` refactored to extend `IDModel` base class and use `FeaturePipeline`
+- `Disease` and `SourceType` enums now sourced directly from `iddata.enums`
+- Updated `iddata` dependency to latest commit
+- Ruff isort config: pinned `idmodels` as `known-first-party` for consistent cross-environment linting
+
+### Removed
+- `DataSource` enum (use `SourceType` from `iddata.enums`)
+- `preprocess.py` (superseded by `features.py`)
+
 ## [1.3.1]
 
 ### Changed
@@ -102,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated to latest iddata API
 
-[Unreleased]: https://github.com/reichlab/idmodels/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/reichlab/idmodels/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/reichlab/idmodels/compare/v1.3.1...v2.0.0
 [1.3.0]: https://github.com/reichlab/idmodels/compare/v1.1.0...v1.3.0
 [1.1.0]: https://github.com/reichlab/idmodels/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/reichlab/idmodels/compare/v0.1.0...v1.0.0

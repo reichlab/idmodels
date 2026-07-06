@@ -562,8 +562,8 @@ wheels = [
 
 [[package]]
 name = "iddata"
-version = "0.1.0"
-source = { git = "https://github.com/reichlab/iddata#d049cd28ebe65ac1a0cba82e84691adc34e6ff09" }
+version = "2.0.0"
+source = { git = "https://github.com/reichlab/iddata?rev=a9d14fb9d886b46e639d99cb60ca67b56959f153#a9d14fb9d886b46e639d99cb60ca67b56959f153" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
@@ -607,14 +607,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "coverage", marker = "extra == 'dev'" },
-    { name = "iddata", git = "https://github.com/reichlab/iddata" },
+    { name = "iddata", git = "https://github.com/reichlab/iddata?rev=a9d14fb9d886b46e639d99cb60ca67b56959f153" },
     { name = "lightgbm" },
     { name = "numpy" },
     { name = "pandas", specifier = "~=2.0" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
-    { name = "sarix", git = "https://github.com/reichlab/sarix" },
+    { name = "sarix", git = "https://github.com/reichlab/sarix?rev=35eea2379a9790e0457b1aed41d13509e5d5056f" },
     { name = "scikit-learn" },
     { name = "timeseriesutils", git = "https://github.com/reichlab/timeseriesutils" },
     { name = "tqdm" },
@@ -1635,7 +1635,7 @@ wheels = [
 [[package]]
 name = "sarix"
 version = "0.2.0"
-source = { git = "https://github.com/reichlab/sarix#35eea2379a9790e0457b1aed41d13509e5d5056f" }
+source = { git = "https://github.com/reichlab/sarix?rev=35eea2379a9790e0457b1aed41d13509e5d5056f#35eea2379a9790e0457b1aed41d13509e5d5056f" }
 dependencies = [
     { name = "jax" },
     { name = "matplotlib" },

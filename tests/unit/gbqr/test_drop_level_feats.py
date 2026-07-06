@@ -1,4 +1,6 @@
-from idmodels.preprocess import _drop_level_feats
+import pandas as pd
+
+from idmodels.features import LevelFeatureFilter
 
 
 def test_drop_level_feats():
@@ -27,7 +29,7 @@ def test_drop_level_feats():
                 "inc_trans_cs_taylor_d1_c1_w5t_sNone_lag1", "inc_trans_cs_taylor_d1_c1_w5t_sNone_lag2",
                 "inc_trans_cs_rollmean_w2_lag1", "inc_trans_cs_rollmean_w2_lag2",
                 "inc_trans_cs_rollmean_w4_lag1", "inc_trans_cs_rollmean_w4_lag2", "horizon"]
-    
+
     # subset of in_feats expected to be returned by _drop_level_feats:
     # I have manually removed any that measure local level of the surveillance signal in some way
     # these are 'inc_trans_cs', rolling means of that, and degree 0 coefficients ('c0')
@@ -50,8 +52,8 @@ def test_drop_level_feats():
                 "inc_trans_cs_taylor_d1_c1_w3t_sNone_lag1", "inc_trans_cs_taylor_d1_c1_w3t_sNone_lag2",
                 "inc_trans_cs_taylor_d1_c1_w5t_sNone_lag1", "inc_trans_cs_taylor_d1_c1_w5t_sNone_lag2",
                 "horizon"]
-    
-    actual = _drop_level_feats(in_feats)
-    
+
+    _, actual = LevelFeatureFilter().apply(pd.DataFrame(), in_feats)
+
     assert len(actual) == len(expected)
     assert not set(actual) - set(expected)

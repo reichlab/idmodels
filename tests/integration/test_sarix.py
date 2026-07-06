@@ -8,43 +8,35 @@ import pytest
 from pandas.testing import assert_frame_equal
 
 from idmodels.config import (
-    DataSource,
-    Disease,
     PoolingStrategy,
     PowerTransform,
-    RunConfig,
     SARIXFourierModelConfig,
     SARIXModelConfig,
+    SourceType,
 )
 from idmodels.sarix import SARIXFourierModel, SARIXModel
 
 
-def test_sarix_nhsn(tmp_path):
+def test_sarix_nhsn(make_run_config):
     date = datetime.date.fromisoformat("2024-01-06")
-    fips_codes = ["US", "01", "02", "04", "05", "06", "08", "09", "10", "11",
-                "12", "13", "15", "16", "17", "18", "19", "20", "21", "22",
-                "23", "24", "25", "26", "27", "28", "29", "30", "31", "32",
-                "33", "34", "35", "36", "37", "38", "39", "40", "41", "42",
-                "44", "45", "46", "47", "48", "49", "50", "51", "53", "54",
-                "55", "56", "72"]
-    model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling=PoolingStrategy.SHARED,
+    fips_codes = ["US", "01", "02", "04", "05", "06", "08", "09", "10", "11", "12", "13", "15", "16", "17", "18", "19",
+                  "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36",
+                  "37", "38", "39", "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "53", "54", "55",
+                  "56", "72"]
+    model_config = create_test_sarix_model_config(main_source=[SourceType.NHSN], theta_pooling=PoolingStrategy.SHARED,
                                                   sigma_pooling=PoolingStrategy.NONE, num=200)
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
     with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()):
         model = SARIXModel(model_config)
         model.run(run_config)
 
-    actual_df = pd.read_csv(
-        run_config.output_root / f"UMass-{model_config.model_name}" /
-        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
-    )
-    expected_df = pd.read_csv(
-        Path("tests") / "integration" / "data" /
-        f"UMass-{model_config.model_name}" /
-        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
-    )
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
+    expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
+                              f"UMass-{model_config.model_name}" /
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
     assert_frame_equal(actual_df, expected_df)
 
 
@@ -53,55 +45,49 @@ def test_sarix_nhsn(tmp_path):
     ([], ["1", "25", "99"]),  # hsas only
     (["US", "01", "25"], ["1", "25", "99"])  # both
 ])
-def test_sarix_nssp(tmp_path, fips_codes, nci_ids):
+def test_sarix_nssp(make_run_config, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-11-22")
-    model_config = create_test_sarix_model_config(main_source=[DataSource.NSSP], theta_pooling=PoolingStrategy.SHARED,
+    model_config = create_test_sarix_model_config(main_source=[SourceType.NSSP], theta_pooling=PoolingStrategy.SHARED,
                                                   sigma_pooling=PoolingStrategy.NONE, num=200)
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=nci_ids, tmp_path=tmp_path)
-    
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=nci_ids)
+
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
     if (fips_codes != []) & (nci_ids == []):
-        locs_len = 3 # only forecast for 3 states
+        locs_len = 3  # only forecast for 3 states
         agg_level = "state"
     elif (fips_codes == []) & (nci_ids != []):
-        locs_len = 3 # only forecast for 3 hsas
+        locs_len = 3  # only forecast for 3 hsas
         agg_level = "hsa"
     else:
-        locs_len = 6 # only forecast for 6 locs
+        locs_len = 6  # only forecast for 6 locs
         agg_level = "both"
-    
+
     with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()[:, 0:locs_len, :]):
         model = SARIXModel(model_config)
         model.run(run_config)
 
-    actual_df = pd.read_csv(
-        run_config.output_root / f"UMass-{model_config.model_name}" / 
-        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
-    )
-    expected_df = pd.read_csv(
-        Path("tests") / "integration" / "data" /
-        f"UMass-{model_config.model_name}" / 
-        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-{agg_level}.csv"
-    )
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
+    expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
+                              f"UMass-{model_config.model_name}" /
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-{agg_level}.csv")
     assert_frame_equal(actual_df, expected_df)
 
 
-def test_sarix_shared_sigma_pooling_multiple_batches(tmp_path):
+def test_sarix_shared_sigma_pooling_multiple_batches(make_run_config):
     """Test that sigma_pooling='shared' works correctly with multiple batches (locations)."""
     # Use multiple locations to ensure we have multiple batches
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05"]  # Multiple locs = multiple batches
-    model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling=PoolingStrategy.NONE,
+    model_config = create_test_sarix_model_config(main_source=[SourceType.NHSN], theta_pooling=PoolingStrategy.NONE,
                                                   sigma_pooling=PoolingStrategy.SHARED, num=200)
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
-    
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
+
     model = SARIXModel(model_config)
     model.run(run_config)
 
-    actual_df = pd.read_csv(
-        run_config.output_root / f"UMass-{model_config.model_name}" / 
-        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
-    )
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
 
     # Verify the output has the expected structure
     assert len(actual_df) > 0, "Output dataframe should not be empty"
@@ -118,11 +104,11 @@ def test_sarix_shared_sigma_pooling_multiple_batches(tmp_path):
         "All predictions should be non-negative"
 
 
-def test_sarix_fourier_none_pooling(tmp_path):
+def test_sarix_fourier_none_pooling(make_run_config):
     """Test SARIXFourierModel with fourier_pooling='none' (unpooled)."""
     model_config = SARIXFourierModelConfig(
         model_name="sarix_p2_fourier_K2_none",
-        sources=[DataSource.NHSN],
+        sources=[SourceType.NHSN],
         fit_locations_separately=False,
         p=2,
         P=0,
@@ -139,18 +125,16 @@ def test_sarix_fourier_none_pooling(tmp_path):
         num_samples=50)
 
     date = datetime.date.fromisoformat("2024-01-06")
-    fips_codes = ["US", "01", "02", "04", "05"] # fewer locs for faster testing
-    # model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling="shared", sigma_pooling="none")
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
+    fips_codes = ["US", "01", "02", "04", "05"]  # fewer locs for faster testing
+    # model_config = create_test_sarix_model_config(main_source=[SourceType.NHSN], theta_pooling="shared", sigma_pooling="none")
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     model = SARIXFourierModel(model_config)
     model.run(run_config)
 
     # Verify output structure
-    actual_df = pd.read_csv(
-        run_config.output_root / f"UMass-{model_config.model_name}" / 
-        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
-    )
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
 
     # Assertions
     assert len(actual_df) > 0, "Output dataframe should not be empty"
@@ -166,11 +150,11 @@ def test_sarix_fourier_none_pooling(tmp_path):
         "All predictions should be non-negative"
 
 
-def test_sarix_fourier_shared_pooling(tmp_path):
+def test_sarix_fourier_shared_pooling(make_run_config):
     """Test SARIXFourierModel with fourier_pooling='shared' (pooled across locations)."""
     model_config = SARIXFourierModelConfig(
         model_name="sarix_p2_fourier_K2_shared",
-        sources=[DataSource.NHSN],
+        sources=[SourceType.NHSN],
         fit_locations_separately=False,
         p=2,
         P=0,
@@ -187,18 +171,16 @@ def test_sarix_fourier_shared_pooling(tmp_path):
         num_samples=50)
 
     date = datetime.date.fromisoformat("2024-01-06")
-    fips_codes = ["US", "01", "02", "04", "05"] # fewer locs for faster testing
-    # model_config = create_test_sarix_model_config(main_source=[DataSource.NHSN], theta_pooling="shared", sigma_pooling="none")
-    run_config = create_test_sarix_run_config(ref_date=date, states=fips_codes, hsas=[], tmp_path=tmp_path)
+    fips_codes = ["US", "01", "02", "04", "05"]  # fewer locs for faster testing
+    # model_config = create_test_sarix_model_config(main_source=[SourceType.NHSN], theta_pooling="shared", sigma_pooling="none")
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     model = SARIXFourierModel(model_config)
     model.run(run_config)
 
     # Verify output structure
-    actual_df = pd.read_csv(
-        run_config.output_root / f"UMass-{model_config.model_name}" / 
-        f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
-    )
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
 
     # Assertions
     assert len(actual_df) > 0, "Output dataframe should not be empty"
@@ -218,7 +200,7 @@ def test_sarix_fourier_wrong_config_type():
     """Test that SARIXFourierModel raises TypeError when given a SARIXModelConfig instead of SARIXFourierModelConfig."""
     model_config = SARIXModelConfig(
         model_name="sarix_p2",
-        sources=[DataSource.NHSN],
+        sources=[SourceType.NHSN],
         fit_locations_separately=False,
         p=2, P=0, d=0, D=0, season_period=1,
         power_transform=PowerTransform.FOURTH_ROOT,
@@ -231,25 +213,27 @@ def test_sarix_fourier_wrong_config_type():
         SARIXFourierModel(model_config)
 
 
-def create_test_sarix_model_config(main_source, theta_pooling: PoolingStrategy, sigma_pooling: PoolingStrategy, num: int = 200):
+def create_test_sarix_model_config(main_source, theta_pooling: PoolingStrategy, sigma_pooling: PoolingStrategy,
+                                   num: int = 200):
     model_config = SARIXModelConfig(
-        model_name = "sarix_" + main_source[0].value + "_p6_4rt_theta" + theta_pooling.value + "_sigma" + sigma_pooling.value,
+        model_name="sarix_" + main_source[
+            0].value + "_p6_4rt_theta" + theta_pooling.value + "_sigma" + sigma_pooling.value,
 
         # data sources and adjustments for reporting issues
-        sources = main_source,
+        sources=main_source,
 
         # fit locations separately or jointly
-        fit_locations_separately = False,
+        fit_locations_separately=False,
 
         # SARI model parameters
-        p = 6,
-        P = 0,
-        d = 0,
-        D = 0,
-        season_period = 1,
+        p=6,
+        P=0,
+        d=0,
+        D=0,
+        season_period=1,
 
         # power transform applied to surveillance signals
-        power_transform = PowerTransform.FOURTH_ROOT,
+        power_transform=PowerTransform.FOURTH_ROOT,
 
         # sharing of information about parameters
         theta_pooling=theta_pooling,
@@ -264,20 +248,7 @@ def create_test_sarix_model_config(main_source, theta_pooling: PoolingStrategy, 
     )
     return model_config
 
-def create_test_sarix_run_config(ref_date, states, hsas, tmp_path):
-    run_config = RunConfig(
-        disease=Disease.FLU,
-        ref_date=ref_date,
-        output_root=tmp_path / "model-output",
-        artifact_store_root=tmp_path / "artifact-store",
-        states=states,
-        hsas = hsas,
-        max_horizon=3,
-        q_levels=[0.025, 0.50, 0.975],
-        q_labels=["0.025", "0.5", "0.975"],
-    )
-    return run_config
-    
+
 
 def _np_percentile_val():
     return numpy.array(
