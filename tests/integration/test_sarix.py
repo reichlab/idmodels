@@ -23,7 +23,7 @@ def test_sarix_nhsn(make_run_config):
                   "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36",
                   "37", "38", "39", "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "53", "54", "55",
                   "56", "72"]
-    model_config = create_test_sarix_model_config(main_source=[SourceType.NHSN], theta_pooling=PoolingStrategy.SHARED,
+    model_config = create_test_sarix_model_config(main_source=SourceType.NHSN, theta_pooling=PoolingStrategy.SHARED,
                                                   sigma_pooling=PoolingStrategy.NONE, num=200)
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
@@ -47,7 +47,7 @@ def test_sarix_nhsn(make_run_config):
 ])
 def test_sarix_nssp(make_run_config, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-11-22")
-    model_config = create_test_sarix_model_config(main_source=[SourceType.NSSP], theta_pooling=PoolingStrategy.SHARED,
+    model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
                                                   sigma_pooling=PoolingStrategy.NONE, num=200)
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=nci_ids)
 
@@ -79,7 +79,7 @@ def test_sarix_shared_sigma_pooling_multiple_batches(make_run_config):
     # Use multiple locations to ensure we have multiple batches
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05"]  # Multiple locs = multiple batches
-    model_config = create_test_sarix_model_config(main_source=[SourceType.NHSN], theta_pooling=PoolingStrategy.NONE,
+    model_config = create_test_sarix_model_config(main_source=SourceType.NHSN, theta_pooling=PoolingStrategy.NONE,
                                                   sigma_pooling=PoolingStrategy.SHARED, num=200)
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
@@ -108,7 +108,7 @@ def test_sarix_fourier_none_pooling(make_run_config):
     """Test SARIXFourierModel with fourier_pooling='none' (unpooled)."""
     model_config = SARIXFourierModelConfig(
         model_name="sarix_p2_fourier_K2_none",
-        sources=[SourceType.NHSN],
+        main_source=SourceType.NHSN,
         fit_locations_separately=False,
         p=2,
         P=0,
@@ -126,7 +126,7 @@ def test_sarix_fourier_none_pooling(make_run_config):
 
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05"]  # fewer locs for faster testing
-    # model_config = create_test_sarix_model_config(main_source=[SourceType.NHSN], theta_pooling="shared", sigma_pooling="none")
+    # model_config = create_test_sarix_model_config(main_source=SourceType.NHSN, theta_pooling="shared", sigma_pooling="none")
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     model = SARIXFourierModel(model_config)
@@ -154,7 +154,7 @@ def test_sarix_fourier_shared_pooling(make_run_config):
     """Test SARIXFourierModel with fourier_pooling='shared' (pooled across locations)."""
     model_config = SARIXFourierModelConfig(
         model_name="sarix_p2_fourier_K2_shared",
-        sources=[SourceType.NHSN],
+        main_source=SourceType.NHSN,
         fit_locations_separately=False,
         p=2,
         P=0,
@@ -172,7 +172,7 @@ def test_sarix_fourier_shared_pooling(make_run_config):
 
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05"]  # fewer locs for faster testing
-    # model_config = create_test_sarix_model_config(main_source=[SourceType.NHSN], theta_pooling="shared", sigma_pooling="none")
+    # model_config = create_test_sarix_model_config(main_source=SourceType.NHSN, theta_pooling="shared", sigma_pooling="none")
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     model = SARIXFourierModel(model_config)
@@ -200,7 +200,7 @@ def test_sarix_fourier_wrong_config_type():
     """Test that SARIXFourierModel raises TypeError when given a SARIXModelConfig instead of SARIXFourierModelConfig."""
     model_config = SARIXModelConfig(
         model_name="sarix_p2",
-        sources=[SourceType.NHSN],
+        main_source=SourceType.NHSN,
         fit_locations_separately=False,
         p=2, P=0, d=0, D=0, season_period=1,
         power_transform=PowerTransform.FOURTH_ROOT,
@@ -216,11 +216,10 @@ def test_sarix_fourier_wrong_config_type():
 def create_test_sarix_model_config(main_source, theta_pooling: PoolingStrategy, sigma_pooling: PoolingStrategy,
                                    num: int = 200):
     model_config = SARIXModelConfig(
-        model_name="sarix_" + main_source[
-            0].value + "_p6_4rt_theta" + theta_pooling.value + "_sigma" + sigma_pooling.value,
+        model_name="sarix_" + main_source.value + "_p6_4rt_theta" + theta_pooling.value + "_sigma" + sigma_pooling.value,
 
         # data sources and adjustments for reporting issues
-        sources=main_source,
+        main_source=main_source,
 
         # fit locations separately or jointly
         fit_locations_separately=False,

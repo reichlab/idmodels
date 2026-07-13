@@ -18,7 +18,7 @@ def test_gbqr_nhsn(make_run_config):
                   "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36",
                   "37", "38", "39", "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "53", "54", "55",
                   "56", "72"]
-    model_config = create_test_gbqr_model_config(sources=[SourceType.FLUSURVNET, SourceType.NHSN, SourceType.ILINET])
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, training_sources=[SourceType.FLUSURVNET, SourceType.ILINET])
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
@@ -40,7 +40,7 @@ def test_gbqr_nhsn(make_run_config):
 ])
 def test_gbqr_nssp(make_run_config, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-11-22")
-    model_config = create_test_gbqr_model_config(sources=[SourceType.NSSP])
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NSSP)
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=nci_ids)
 
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
@@ -67,14 +67,7 @@ def test_gbqr_nssp(make_run_config, fips_codes, nci_ids):
     assert_frame_equal(actual_df, expected_df)
 
 
-def create_test_gbqr_model_config(sources):
-    if SourceType.NHSN in sources:
-        main_source = SourceType.NHSN
-    elif SourceType.NSSP in sources:
-        main_source = SourceType.NSSP
-    else:
-        main_source = None
-
+def create_test_gbqr_model_config(main_source, training_sources=[]):
     model_config = GBQRModelConfig(
         model_name="gbqr_" + main_source.value + "_no_reporting_adj",
 
@@ -88,7 +81,8 @@ def create_test_gbqr_model_config(sources):
         reporting_adj=False,
 
         # data sources and adjustments for reporting issues
-        sources=sources,
+        main_source=main_source,
+        training_sources=training_sources,
 
         # fit locations separately or jointly
         fit_locations_separately=False,

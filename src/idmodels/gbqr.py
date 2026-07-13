@@ -42,11 +42,13 @@ class GBQRModel(IDModel):
                       SourceType.NSSP: NSSPDataSource(disease=run_config.disease),
                       SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
                       SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj)}
-        # Check if both nhsn and nssp data are included as sources
-        if SourceType.NHSN in self.model_config.sources and SourceType.NSSP in self.model_config.sources:
-            raise ValueError("Only one of NHSN or NSSP may be selected.")
+        all_sources = list(dict.fromkeys([self.model_config.main_source] + self.model_config.training_sources))
 
-        return [source_map[s] for s in self.model_config.sources]
+        # Check if both nhsn and nssp data are included as sources
+        if self.model_config.main_source not in [SourceType.NHSN, SourceType.NSSP]:
+            raise ValueError("GBQRModel only supports NHSN and NSSP as main source.")
+
+        return [source_map[s] for s in all_sources]
 
 
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:

@@ -25,7 +25,7 @@ class ModelConfig(ABC):
     """Abstract base for model configuration."""
 
     model_name: str
-    sources: list[SourceType]
+    main_source: SourceType
     fit_locations_separately: bool
     power_transform: PowerTransform
 
@@ -73,6 +73,7 @@ class SARIXFourierModelConfig(SARIXModelConfig):
 
 @dataclass
 class GBQRModelConfig(ModelConfig):
+    training_sources: list[SourceType] = field(default_factory=list)
     incl_level_feats: bool = True
     num_bags: int = 100
     bag_frac_samples: float = 0.7
