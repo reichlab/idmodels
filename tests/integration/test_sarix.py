@@ -213,6 +213,15 @@ def test_sarix_fourier_wrong_config_type():
         SARIXFourierModel(model_config)
 
 
+def test_sarix_invalid_main_source_raises(make_run_config):
+    model_config = create_test_sarix_model_config(main_source=SourceType.ILINET, theta_pooling=PoolingStrategy.NONE,
+                                                  sigma_pooling=PoolingStrategy.NONE)
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US"], hsas=[])
+
+    with pytest.raises(ValueError, match="SARIXModel only supports NHSN and NSSP as main source."):
+        SARIXModel(model_config)._build_sources(run_config)
+
+
 def create_test_sarix_model_config(main_source, theta_pooling: PoolingStrategy, sigma_pooling: PoolingStrategy,
                                    num: int = 200):
     model_config = SARIXModelConfig(

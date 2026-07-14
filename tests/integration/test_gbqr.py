@@ -6,6 +6,8 @@ import lightgbm
 import numpy
 import pandas as pd
 import pytest
+from iddata.sources.flusurvnet import FluSurvNetDataSource
+from iddata.sources.nhsn import NHSNDataSource
 from pandas.testing import assert_frame_equal
 
 from idmodels.config import GBQRModelConfig, PowerTransform, SourceType
@@ -65,6 +67,27 @@ def test_gbqr_nssp(make_run_config, fips_codes, nci_ids):
                               f"UMass-{model_config.model_name}" /
                               f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-{agg_level}.csv")
     assert_frame_equal(actual_df, expected_df)
+
+
+def test_gbqr_invalid_main_source_raises(make_run_config):
+    model_config = create_test_gbqr_model_config(main_source=SourceType.ILINET)
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US"], hsas=[])
+
+    with pytest.raises(ValueError, match="GBQRModel only supports NHSN and NSSP as main source."):
+        GBQRModel(model_config)._build_sources(run_config)
+
+
+def test_gbqr_build_sources_dedupes_main_source_in_training_sources(make_run_config):
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        training_sources=[SourceType.NHSN, SourceType.FLUSURVNET],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US"], hsas=[])
+
+    sources = GBQRModel(model_config)._build_sources(run_config)
+
+    assert len(sources) == 2
+    assert {type(s) for s in sources} == {NHSNDataSource, FluSurvNetDataSource}
 
 
 def create_test_gbqr_model_config(main_source, training_sources=[]):
