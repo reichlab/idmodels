@@ -137,7 +137,7 @@ class GBQRModel(IDModel):
         cols_to_keep = ["source", "agg_level", "location", "wk_end_date", "pop", "inc_trans_cs", "horizon",
                         "inc_trans_center_factor", "inc_trans_scale_factor"]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
-        preds_df = preds_df.loc[preds_df["source"].isin(["nhsn", "nssp"])]
+        preds_df = preds_df.loc[preds_df["source"] == self.model_config.main_source.value]
         preds_df = pd.melt(preds_df,
                            id_vars=cols_to_keep,
                            var_name="output_type_id",
