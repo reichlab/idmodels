@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -563,7 +563,7 @@ wheels = [
 [[package]]
 name = "iddata"
 version = "2.0.0"
-source = { git = "https://github.com/reichlab/iddata?rev=24f6410e0e19cea7cbe66577ab7c7ff10b434443#24f6410e0e19cea7cbe66577ab7c7ff10b434443" }
+source = { git = "https://github.com/reichlab/iddata?rev=55937b1545aebe02a163e9a9e66a3db8a1c46ed2#55937b1545aebe02a163e9a9e66a3db8a1c46ed2" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
@@ -607,7 +607,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "coverage", marker = "extra == 'dev'" },
-    { name = "iddata", git = "https://github.com/reichlab/iddata?rev=24f6410e0e19cea7cbe66577ab7c7ff10b434443" },
+    { name = "iddata", git = "https://github.com/reichlab/iddata?rev=55937b1545aebe02a163e9a9e66a3db8a1c46ed2" },
     { name = "lightgbm" },
     { name = "numpy" },
     { name = "pandas", specifier = "~=2.0" },
