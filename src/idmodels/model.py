@@ -36,14 +36,6 @@ class IDModel(ABC):
         """Load data, generate predictions, and save to file."""
         sources = self._build_sources(run_config)
         df = DiseaseDataLoader().load(sources=sources, as_of=run_config.ref_date, ancillary=[PopulationData()])
-        if SourceType.NHSN in self.model_config.sources:
-            nhsn_adjusted = pd.read_csv("nhsn-adjusted.csv", encoding="ISO-8859-1", engine="python")
-            nhsn_adjusted["wk_end_date"] = pd.to_datetime(nhsn_adjusted["wk_end_date"])
-            nhsn_adjusted = nhsn_adjusted.loc[(nhsn_adjusted["wk_end_date"] < pd.Timestamp(run_config.ref_date))]
-            adjusted_key = pd.MultiIndex.from_arrays([nhsn_adjusted["location"], nhsn_adjusted["wk_end_date"]])
-            df_key = pd.MultiIndex.from_arrays([df["location"], df["wk_end_date"]])
-            is_replaced = (df["source"] == "nhsn") & df_key.isin(adjusted_key)
-            df = pd.concat([df.loc[~is_replaced], nhsn_adjusted], axis=0)
         df = self._filter_locations(df, run_config)
         df["unique_id"] = df["agg_level"] + df["location"]
 
