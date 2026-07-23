@@ -38,7 +38,7 @@ frozenlist==1.5.0
     #   aiosignal
 fsspec==2024.10.0
     # via s3fs
-iddata @ git+https://github.com/reichlab/iddata@a9d14fb9d886b46e639d99cb60ca67b56959f153
+iddata @ git+https://github.com/reichlab/iddata@784bddd6e43ec06d3e752b267fe2482e38dfdd7c
     # via idmodels (pyproject.toml)
 identify==2.6.1
     # via pre-commit
@@ -173,5 +173,7 @@ virtualenv==20.27.1
     # via pre-commit
 wrapt==1.16.0
     # via aiobotocore
+xlrd==2.0.2
+    # via iddata
 yarl==1.17.1
     # via aiohttp
