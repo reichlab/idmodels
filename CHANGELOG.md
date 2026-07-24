@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0]
+
+### Added
+- `supplementary_sources` field on `GBQRModelConfig` for combining NHSN and NSSP as additional training data alongside `main_source`
+- Tests covering `main_source` validation and `supplementary_sources` deduplication in `GBQRModel`/`SARIXModel._build_sources`
+
+### Changed
+- **Breaking**: `ModelConfig.sources` replaced by `ModelConfig.main_source` (a single `SourceType`); `main_source` determines output formatting (target name, unit conversion) while `GBQRModelConfig.supplementary_sources` lists any additional sources used only for model fitting
+- `GBQRModel`/`SARIXModel` output formatting (`_build_transform`, `_invert_transform`, `_format_output`) now keyed off `main_source` instead of scanning `sources`
+
+### Fixed
+- `GBQRModel` producing duplicate forecast rows when NHSN and NSSP were both present as sources; test-set filtering in `_train_gbq_and_predict()` now scopes to `main_source` instead of `source.isin(["nhsn", "nssp"])`
+
 ## [2.0.0]
 
 ### Added
@@ -130,7 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated to latest iddata API
 
-[Unreleased]: https://github.com/reichlab/idmodels/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/reichlab/idmodels/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/reichlab/idmodels/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/reichlab/idmodels/compare/v1.3.1...v2.0.0
 [1.3.0]: https://github.com/reichlab/idmodels/compare/v1.1.0...v1.3.0
 [1.1.0]: https://github.com/reichlab/idmodels/compare/v1.0.0...v1.1.0
