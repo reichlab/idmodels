@@ -96,7 +96,7 @@ class IDModel(ABC):
             SourceType.ILINET: (ILINET_FLOOR, ILINET_SCALE),
             SourceType.FLUSURVNET: (FLUSURVNET_FLOOR, FLUSURVNET_SCALE),
         }
-        all_sources = [self.model_config.main_source] + getattr(self.model_config, "training_sources", [])
+        all_sources = [self.model_config.main_source] + getattr(self.model_config, "supplementary_sources", [])
         source_scale_params = {
             src.value: params
             for src, params in _SOURCE_SCALE_PARAMS.items()

@@ -73,7 +73,7 @@ class SARIXFourierModelConfig(SARIXModelConfig):
 
 @dataclass
 class GBQRModelConfig(ModelConfig):
-    training_sources: list[SourceType] = field(default_factory=list)
+    supplementary_sources: list[SourceType] = field(default_factory=list)
     incl_level_feats: bool = True
     num_bags: int = 100
     bag_frac_samples: float = 0.7

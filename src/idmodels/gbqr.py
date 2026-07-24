@@ -43,7 +43,7 @@ class GBQRModel(IDModel):
                       SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
                       SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj)}
         # concatenate + dedupe sources while preserving order so main_source is always first
-        all_sources = list(dict.fromkeys([self.model_config.main_source] + self.model_config.training_sources))
+        all_sources = list(dict.fromkeys([self.model_config.main_source] + self.model_config.supplementary_sources))
 
         # Check if both nhsn and nssp data are included as sources
         if self.model_config.main_source not in [SourceType.NHSN, SourceType.NSSP]:

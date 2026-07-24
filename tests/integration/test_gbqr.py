@@ -20,7 +20,7 @@ def test_gbqr_nhsn(make_run_config):
                   "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36",
                   "37", "38", "39", "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "53", "54", "55",
                   "56", "72"]
-    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, training_sources=[SourceType.FLUSURVNET, SourceType.ILINET])
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.FLUSURVNET, SourceType.ILINET])
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
@@ -77,10 +77,10 @@ def test_gbqr_invalid_main_source_raises(make_run_config):
         GBQRModel(model_config)._build_sources(run_config)
 
 
-def test_gbqr_build_sources_dedupes_main_source_in_training_sources(make_run_config):
+def test_gbqr_build_sources_dedupes_main_source_in_supplementary_sources(make_run_config):
     model_config = create_test_gbqr_model_config(
         main_source=SourceType.NHSN,
-        training_sources=[SourceType.NHSN, SourceType.FLUSURVNET],
+        supplementary_sources=[SourceType.NHSN, SourceType.FLUSURVNET],
     )
     run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US"], hsas=[])
 
@@ -98,7 +98,7 @@ def test_gbqr_test_set_predictions_filter_to_main_source(make_run_config):
     as main_source, the filter must be scoped to main_source -- otherwise both sources' rows
     survive into the output, producing duplicate (location, wk_end_date, horizon) rows.
     """
-    model_config = create_test_gbqr_model_config(main_source=SourceType.NSSP, training_sources=[SourceType.NHSN])
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NSSP, supplementary_sources=[SourceType.NHSN])
     model_config.num_bags = 2
     model_config.bag_frac_samples = 1.0
     date = datetime.date.fromisoformat("2024-01-06")
@@ -135,7 +135,7 @@ def test_gbqr_test_set_predictions_filter_to_main_source(make_run_config):
     assert not preds_df.duplicated(subset=key_cols).any()
 
 
-def create_test_gbqr_model_config(main_source, training_sources=[]):
+def create_test_gbqr_model_config(main_source, supplementary_sources=[]):
     model_config = GBQRModelConfig(
         model_name="gbqr_" + main_source.value + "_no_reporting_adj",
 
@@ -150,7 +150,7 @@ def create_test_gbqr_model_config(main_source, training_sources=[]):
 
         # data sources and adjustments for reporting issues
         main_source=main_source,
-        training_sources=training_sources,
+        supplementary_sources=supplementary_sources,
 
         # fit locations separately or jointly
         fit_locations_separately=False,
