@@ -42,11 +42,14 @@ class GBQRModel(IDModel):
                       SourceType.NSSP: NSSPDataSource(disease=run_config.disease),
                       SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
                       SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj)}
-        # Check if both nhsn and nssp data are included as sources
-        if SourceType.NHSN in self.model_config.sources and SourceType.NSSP in self.model_config.sources:
-            raise ValueError("Only one of NHSN or NSSP may be selected.")
+        # concatenate + dedupe sources while preserving order so main_source is always first
+        all_sources = list(dict.fromkeys([self.model_config.main_source] + self.model_config.supplementary_sources))
 
-        return [source_map[s] for s in self.model_config.sources]
+        # Check if both nhsn and nssp data are included as sources
+        if self.model_config.main_source not in [SourceType.NHSN, SourceType.NSSP]:
+            raise ValueError("GBQRModel only supports NHSN and NSSP as main source.")
+
+        return [source_map[s] for s in all_sources]
 
 
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:
@@ -135,7 +138,7 @@ class GBQRModel(IDModel):
         cols_to_keep = ["source", "agg_level", "location", "wk_end_date", "pop", "inc_trans_cs", "horizon",
                         "inc_trans_center_factor", "inc_trans_scale_factor"]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
-        preds_df = preds_df.loc[preds_df["source"].isin(["nhsn", "nssp"])]
+        preds_df = preds_df.loc[preds_df["source"] == self.model_config.main_source.value]
         preds_df = pd.melt(preds_df,
                            id_vars=cols_to_keep,
                            var_name="output_type_id",

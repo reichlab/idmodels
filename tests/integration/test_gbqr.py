@@ -6,6 +6,8 @@ import lightgbm
 import numpy
 import pandas as pd
 import pytest
+from iddata.sources.flusurvnet import FluSurvNetDataSource
+from iddata.sources.nhsn import NHSNDataSource
 from pandas.testing import assert_frame_equal
 
 from idmodels.config import GBQRModelConfig, PowerTransform, SourceType
@@ -18,7 +20,7 @@ def test_gbqr_nhsn(make_run_config):
                   "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36",
                   "37", "38", "39", "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "53", "54", "55",
                   "56", "72"]
-    model_config = create_test_gbqr_model_config(sources=[SourceType.FLUSURVNET, SourceType.NHSN, SourceType.ILINET])
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.FLUSURVNET, SourceType.ILINET])
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
@@ -40,7 +42,7 @@ def test_gbqr_nhsn(make_run_config):
 ])
 def test_gbqr_nssp(make_run_config, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-11-22")
-    model_config = create_test_gbqr_model_config(sources=[SourceType.NSSP])
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NSSP)
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=nci_ids)
 
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
@@ -67,14 +69,73 @@ def test_gbqr_nssp(make_run_config, fips_codes, nci_ids):
     assert_frame_equal(actual_df, expected_df)
 
 
-def create_test_gbqr_model_config(sources):
-    if SourceType.NHSN in sources:
-        main_source = SourceType.NHSN
-    elif SourceType.NSSP in sources:
-        main_source = SourceType.NSSP
-    else:
-        main_source = None
+def test_gbqr_invalid_main_source_raises(make_run_config):
+    model_config = create_test_gbqr_model_config(main_source=SourceType.ILINET)
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US"], hsas=[])
 
+    with pytest.raises(ValueError, match="GBQRModel only supports NHSN and NSSP as main source."):
+        GBQRModel(model_config)._build_sources(run_config)
+
+
+def test_gbqr_build_sources_dedupes_main_source_in_supplementary_sources(make_run_config):
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.NHSN, SourceType.FLUSURVNET],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US"], hsas=[])
+
+    sources = GBQRModel(model_config)._build_sources(run_config)
+
+    assert len(sources) == 2
+    assert {type(s) for s in sources} == {NHSNDataSource, FluSurvNetDataSource}
+
+
+def test_gbqr_test_set_predictions_filter_to_main_source(make_run_config):
+    """
+    Regression test: _train_gbq_and_predict() used to keep test-set rows for source in
+    {"nhsn", "nssp"} unconditionally. That was only safe because a model's sources could not
+    include both NHSN and NSSP at once. Now that NHSN can be a training_source alongside NSSP
+    as main_source, the filter must be scoped to main_source -- otherwise both sources' rows
+    survive into the output, producing duplicate (location, wk_end_date, horizon) rows.
+    """
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NSSP, supplementary_sources=[SourceType.NHSN])
+    model_config.num_bags = 2
+    model_config.bag_frac_samples = 1.0
+    date = datetime.date.fromisoformat("2024-01-06")
+    run_config = make_run_config(ref_date=date, states=["01"], hsas=[])
+
+    dates = pd.to_datetime(["2023-12-16", "2023-12-23", "2023-12-30", "2024-01-06"])
+    rows = []
+    for source in ["nssp", "nhsn"]:
+        for i, wk_end_date in enumerate(dates):
+            is_test = wk_end_date == dates.max()
+            rows.append({
+                "source": source,
+                "agg_level": "state",
+                "location": "01",
+                "wk_end_date": wk_end_date,
+                "pop": 1_000_000,
+                "inc_trans_cs": 0.1 * (i + 1),
+                "horizon": 1,
+                "inc_trans_center_factor": 0.0,
+                "inc_trans_scale_factor": 1.0,
+                "season": "2023/24",
+                "season_week": 10,
+                "delta_target": None if is_test else 0.05 * (i + 1),
+                "feat1": float(i),
+            })
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    with patch.object(lightgbm.sklearn.LGBMModel, "predict", return_value=numpy.array([0.1, 0.1])):
+        preds_df = model._fit_and_predict(df, feat_names=["feat1"], run_config=run_config)
+
+    assert set(preds_df["source"].unique()) == {"nssp"}
+    key_cols = ["location", "wk_end_date", "horizon", "output_type_id"]
+    assert not preds_df.duplicated(subset=key_cols).any()
+
+
+def create_test_gbqr_model_config(main_source, supplementary_sources=[]):
     model_config = GBQRModelConfig(
         model_name="gbqr_" + main_source.value + "_no_reporting_adj",
 
@@ -88,7 +149,8 @@ def create_test_gbqr_model_config(sources):
         reporting_adj=False,
 
         # data sources and adjustments for reporting issues
-        sources=sources,
+        main_source=main_source,
+        supplementary_sources=supplementary_sources,
 
         # fit locations separately or jointly
         fit_locations_separately=False,

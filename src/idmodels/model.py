@@ -96,10 +96,11 @@ class IDModel(ABC):
             SourceType.ILINET: (ILINET_FLOOR, ILINET_SCALE),
             SourceType.FLUSURVNET: (FLUSURVNET_FLOOR, FLUSURVNET_SCALE),
         }
+        all_sources = [self.model_config.main_source] + getattr(self.model_config, "supplementary_sources", [])
         source_scale_params = {
             src.value: params
             for src, params in _SOURCE_SCALE_PARAMS.items()
-            if src in self.model_config.sources
+            if src in all_sources
         }
         if self.model_config.power_transform == PowerTransform.FOURTH_ROOT:
             power_t: Transform = FourthRootTransform()
@@ -122,10 +123,10 @@ class IDModel(ABC):
         preds_df["value"] = transform.invert(preds_df["value"].values, context=preds_df)
         preds_df["value"] = np.maximum(preds_df["value"], 0.0)
 
-        if SourceType.NHSN in self.model_config.sources:
+        if self.model_config.main_source == SourceType.NHSN:
             # turn nhsn rates back into counts
             preds_df["value"] = preds_df["value"] * preds_df["pop"] / 100000
-        elif SourceType.NSSP in self.model_config.sources:
+        elif self.model_config.main_source == SourceType.NSSP:
             preds_df["value"] = np.minimum(preds_df["value"] / 100, 1.0)  # percentage to proportion
 
         return preds_df
@@ -133,9 +134,9 @@ class IDModel(ABC):
 
     def _format_output(self, preds_df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:
         """Reshape to FluSight hub submission format."""
-        if SourceType.NHSN in self.model_config.sources:
+        if self.model_config.main_source == SourceType.NHSN:
             target_name = f"wk inc {run_config.disease.value} hosp"
-        else:
+        elif self.model_config.main_source == SourceType.NSSP:
             target_name = f"wk inc {run_config.disease.value} prop ed visits"
 
         preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(

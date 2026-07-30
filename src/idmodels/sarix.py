@@ -23,14 +23,10 @@ class SARIXModel(IDModel):
     def _build_sources(self, run_config: RunConfig):
         sources_map = {SourceType.NHSN: NHSNDataSource(disease=run_config.disease),
                        SourceType.NSSP: NSSPDataSource(disease=run_config.disease)}
-        if not set(self.model_config.sources) <= sources_map.keys():
-            raise ValueError("SARIXModel only supports NHSN and NSSP sources.")
+        if self.model_config.main_source not in sources_map:
+            raise ValueError("SARIXModel only supports NHSN and NSSP as main source.")
 
-        # Check if both nhsn and nssp data are included as sources
-        if SourceType.NHSN in self.model_config.sources and SourceType.NSSP in self.model_config.sources:
-            raise ValueError("Only one of NHSN or NSSP may be selected.")
-
-        return [sources_map[s] for s in self.model_config.sources]
+        return [sources_map[self.model_config.main_source]]
 
 
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:

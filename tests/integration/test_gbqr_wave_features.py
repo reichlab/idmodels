@@ -190,7 +190,7 @@ def test_gbqr_wave_features_with_model_config_pattern():
 
     # Simulate model_config with wave feature settings
     model_config = GBQRModelConfig(model_name="gbqr_wave_test",
-                                   sources=[SourceType.NHSN],
+                                   main_source=SourceType.NHSN,
                                    fit_locations_separately=False,
                                    power_transform=PowerTransform.FOURTH_ROOT,
                                    use_directional_waves=True,
@@ -234,7 +234,7 @@ def test_gbqr_wave_features_backwards_compatibility():
 
     # Model config WITHOUT wave feature settings (backwards compatibility)
     model_config = GBQRModelConfig(model_name="gbqr_no_waves",
-                                   sources=[SourceType.NHSN],
+                                   main_source=SourceType.NHSN,
                                    fit_locations_separately=False,
                                    power_transform=PowerTransform.FOURTH_ROOT,
                                    # use_directional_waves defaults to False
