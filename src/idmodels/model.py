@@ -53,6 +53,9 @@ class IDModel(ABC):
         save_path = build_save_path(root=run_config.output_root,
                                     run_config=run_config,
                                     model_config=self.model_config)
+
+        self._raise_if_incomplete(preds_df, run_config, save_path)
+
         # Ensure output_type_id is string to avoid pandas inferring it as float when reading
         preds_df["output_type_id"] = preds_df["output_type_id"].astype(str)
         preds_df.to_csv(save_path, index=False)
@@ -164,3 +167,19 @@ class IDModel(ABC):
             ["output_type_id", "horizon", "location", "agg_level"],
             ascending=[True, True, True, False],
         ).reset_index(drop=True)[req_cols]
+
+
+    def _raise_if_incomplete(self, preds_df: pd.DataFrame, run_config: RunConfig, save_path) -> None:
+        """Raise if any predicted value is NaN, refusing to silently write an incomplete submission.
+
+        Missing upstream data (e.g. population for the latest week) can propagate as NaN all the
+        way through a model without raising -- LightGBM and SARIX both happily predict from NaN
+        features -- so this is the last point at which a bad run can still fail loudly instead of
+        writing a CSV that looks complete but has an all-NaN or partially-NaN value column.
+        """
+        if preds_df["value"].isna().any():
+            n_na = preds_df["value"].isna().sum()
+            raise ValueError(
+                f"{n_na}/{len(preds_df)} rows have NaN value for {self.model_config} at "
+                f"ref_date={run_config.ref_date}; refusing to write {save_path}"
+            )
