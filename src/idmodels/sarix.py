@@ -39,7 +39,7 @@ class SARIXModel(IDModel):
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
 
         # missing values are interpolated when possible
-        df = df.query("wk_end_date >= '2022-10-01'").interpolate()
+        df = _interpolate_by_location(df.query("wk_end_date >= '2022-10-01'"), xy_colnames)
         batched_xy = df[xy_colnames].values.reshape(
             len(df["unique_id"].unique()), -1, len(xy_colnames))
 
@@ -120,3 +120,19 @@ class SARIXFourierModel(SARIXModel):
 def _np_percentile(predictions, q_levels, axis):
     """Helper to ease patching from unit tests."""
     return np.percentile(predictions, q_levels, axis)
+
+
+def _interpolate_by_location(df: pd.DataFrame, xy_colnames: list[str]) -> pd.DataFrame:
+    """Interpolate missing values per location.
+
+    Interpolating across the concatenated frame directly would blend values across location
+    boundaries (a single-row gap at the end of one location's block would be filled from the
+    next location's first row). limit_area="inside" leaves a genuine trailing gap (e.g. missing
+    population for the latest week) as NaN rather than forward-filling it, so it can still be
+    caught downstream instead of silently propagating a fabricated value.
+    """
+    df = df.copy()
+    df[xy_colnames] = df.groupby("unique_id")[xy_colnames].transform(
+        lambda g: g.interpolate(limit_area="inside")
+    )
+    return df
