@@ -8,6 +8,7 @@ from iddata.sources.flusurvnet import FluSurvNetDataSource
 from iddata.sources.ilinet import ILINetDataSource
 from iddata.sources.nhsn import NHSNDataSource
 from iddata.sources.nssp import NSSPDataSource
+from iddata.sources.smh import SMHDataSource
 from tqdm.autonotebook import tqdm
 
 from idmodels.config import GBQRModelConfig, RunConfig, SourceType
@@ -37,11 +38,27 @@ class GBQRModel(IDModel):
         self.model_config: GBQRModelConfig = model_config
 
 
+    def _filter_smh(self, df: pd.DataFrame, model_config: GBQRModelConfig, run_config: RunConfig) -> pd.DataFrame:
+        # SMH source values are formatted "smh-{model_id}"; season values are formatted
+        # "{season}{scenario_letter}-{output_type_id}" (see iddata.sources.smh.SMHDataSource.load).
+        df_surveillance = df.loc[df["source"].str[:4] != "smh-"]
+        df_smh = df.loc[(df["source"].str[:4] == "smh-") & (df["wk_end_date"] < pd.Timestamp(run_config.ref_date))]
+        
+        # only filter for model and otid if included in the config file
+        if model_config.smh_model is not None:
+            df_smh = df_smh.loc[df_smh["source"] == f"smh-{model_config.smh_model}"]
+        if model_config.smh_otid is not None:
+            df_smh = df_smh.loc[df_smh["season"].str[9:] == model_config.smh_otid] 
+
+        return pd.concat([df_surveillance, df_smh], join="inner", axis=0)
+
+
     def _build_sources(self, run_config: RunConfig):
         source_map = {SourceType.NHSN: NHSNDataSource(disease=run_config.disease),
                       SourceType.NSSP: NSSPDataSource(disease=run_config.disease),
                       SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
-                      SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj)}
+                      SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj),
+                      SourceType.SMH: SMHDataSource(disease=run_config.disease)}
         # concatenate + dedupe sources while preserving order so main_source is always first
         all_sources = list(dict.fromkeys([self.model_config.main_source] + self.model_config.supplementary_sources))
 
@@ -50,6 +67,13 @@ class GBQRModel(IDModel):
             raise ValueError("GBQRModel only supports NHSN and NSSP as main source.")
 
         return [source_map[s] for s in all_sources]
+
+
+    def _filter_sources_df(self, df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:
+        all_sources = [self.model_config.main_source] + self.model_config.supplementary_sources
+        if SourceType.SMH in all_sources:
+            df = self._filter_smh(df, self.model_config, run_config)
+        return df
 
 
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:

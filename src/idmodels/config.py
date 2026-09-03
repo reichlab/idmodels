@@ -79,6 +79,10 @@ class GBQRModelConfig(ModelConfig):
     bag_frac_samples: float = 0.7
     reporting_adj: bool = False
     save_feat_importance: bool = False
+    
+    # smh trajectory filters
+    smh_model: str | None = None
+    smh_otid: str | None = None
 
     # directional wave features (disabled by default)
     use_directional_waves: bool = False

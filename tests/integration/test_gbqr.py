@@ -35,6 +35,99 @@ def test_gbqr_nhsn(make_run_config):
     assert_frame_equal(actual_df, expected_df)
 
 
+def test_gbqr_nhsn_smh(make_run_config):
+    date = datetime.date.fromisoformat("2024-12-07")
+    fips_codes = ["US", "01", "06", "25", "48", "36", "56", "72"]
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model="NotreDame-FRED", smh_otid="010100010100", custom_name="nhsn_smh")
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
+
+    # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
+    with patch.object(lightgbm.sklearn.LGBMModel, "predict",
+                      return_value=_predictions_val()[0:33]):
+        model = GBQRModel(model_config)
+        model.run(run_config)
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
+    expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
+                              f"UMass-{model_config.model_name}" /
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
+    assert_frame_equal(actual_df, expected_df)
+
+
+
+# tests that synthetic locations aren't dropped
+def test_filter_locations(make_run_config):
+    """
+    Unit test for GBQRModel._filter_locations: particularly that the SMH rows are filtered correctly
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.NSSP, SourceType.SMH],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=["9"])
+
+    rows = [
+        # kept: matches selected surveillance location (state)
+        {"id": "surveillance", "agg_level": "national", "location": "US", "source": "nhsn", "season": "2024/25"},
+        # kept: matches selected surveillance location (hsa)
+        {"id": "surveillance", "agg_level": "hsa", "location": "9", "source": "nssp", "season": "2024/25"},
+        # kept: matches selected location
+        {"id": "smh_match", "agg_level": "national", "location": "syn-US", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100"},
+        # dropped: wrong location
+        {"id": "smh_wrong_location", "agg_level": "state", "location": "syn-01", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100"}
+    ]
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_locations(df, run_config)
+
+    assert set(filtered_df["id"]) == {"surveillance", "surveillance", "smh_match"}
+
+
+@pytest.mark.parametrize("model_id, otid, row_ids", [
+    (None, None, {"surveillance", "smh_match", "smh_wrong_model", "smh_wrong_otid"}), # all SMH models and otids
+    ("NotreDame-FRED", None, {"surveillance", "smh_match", "smh_wrong_otid"}), # Restrict to single SMH model
+    (None, "010100010100", {"surveillance", "smh_match", "smh_wrong_model"}), # Restrict to a single SMH otid
+    ("NotreDame-FRED", "010100010100", {"surveillance", "smh_match"}) # Restrict to a single SMH model-otid combo
+])
+def test_gbqr_filter_smh(make_run_config, model_id, otid, row_ids):
+    """
+    Unit test for GBQRModel._filter_smh: non-SMH rows always pass through, and SMH rows are
+    kept only when they match the configured smh_model and smh_otid, and have wk_end_date
+    strictly before run_config.ref_date.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.SMH],
+        smh_model=model_id,
+        smh_otid=otid,
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    rows = [
+        # kept: non-SMH surveillance source, unaffected by any SMH filter
+        {"id": "surveillance", "source": "nhsn", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")},
+        # kept: matches configured model + output_type_id, strictly before ref_date
+        {"id": "smh_match", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100",
+         "wk_end_date": pd.Timestamp("2024-11-30")},
+        # dropped: wrong model_id
+        {"id": "smh_wrong_model", "source": "smh-OtherModel", "season": "2024/25A-010100010100",
+         "wk_end_date": pd.Timestamp("2024-11-30")},
+        # dropped: wrong output_type_id
+        {"id": "smh_wrong_otid", "source": "smh-NotreDame-FRED", "season": "2024/25A-999999999999",
+         "wk_end_date": pd.Timestamp("2024-11-30")},
+        # dropped: wk_end_date not strictly before ref_date
+        {"id": "smh_not_before_ref_date", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100",
+         "wk_end_date": pd.Timestamp("2024-12-07")},
+    ]
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    assert set(filtered_df["id"]) == row_ids
+
+
 @pytest.mark.parametrize("fips_codes, nci_ids", [
     (["US", "01", "25"], []),  # states only (US national counts as a state)
     ([], ["1", "25", "99"]),  # hsas only
@@ -135,9 +228,10 @@ def test_gbqr_test_set_predictions_filter_to_main_source(make_run_config):
     assert not preds_df.duplicated(subset=key_cols).any()
 
 
-def create_test_gbqr_model_config(main_source, supplementary_sources=[]):
+def create_test_gbqr_model_config(main_source, supplementary_sources=[], smh_model=None, smh_otid=None, custom_name=None):
+    name = custom_name if custom_name is not None else main_source.value
     model_config = GBQRModelConfig(
-        model_name="gbqr_" + main_source.value + "_no_reporting_adj",
+        model_name="gbqr_" + name + "_no_reporting_adj",
 
         incl_level_feats=True,
 
@@ -157,6 +251,10 @@ def create_test_gbqr_model_config(main_source, supplementary_sources=[]):
 
         # power transform applied to surveillance signals
         power_transform=PowerTransform.FOURTH_ROOT,
+
+        # smh trajectory filters
+        smh_model = smh_model,
+        smh_otid = smh_otid
     )
     return model_config
 
