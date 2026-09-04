@@ -9,7 +9,7 @@ from iddata.sources.ilinet import ILINetDataSource
 from iddata.sources.nhsn import NHSNDataSource
 from iddata.sources.nssp import NSSPDataSource
 from iddata.sources.smh import SMHDataSource
-from tqdm.autonotebook import tqdm
+from joblib import Parallel, delayed
 
 from idmodels.config import GBQRModelConfig, RunConfig, SourceType
 from idmodels.features import (
@@ -58,7 +58,9 @@ class GBQRModel(IDModel):
                       SourceType.NSSP: NSSPDataSource(disease=run_config.disease),
                       SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
                       SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj),
-                      SourceType.SMH: SMHDataSource(disease=run_config.disease)}
+                      SourceType.SMH: SMHDataSource(disease=run_config.disease,
+                                                     model_id=self.model_config.smh_model,
+                                                     output_type_id=self.model_config.smh_otid)}
         # concatenate + dedupe sources while preserving order so main_source is always first
         all_sources = list(dict.fromkeys([self.model_config.main_source] + self.model_config.supplementary_sources))
 
@@ -186,32 +188,49 @@ class GBQRModel(IDModel):
         # seeds for lgb model fits, one per combination of bag and quantile level
         lgb_seeds = rng.integers(1e8, size=(self.model_config.num_bags, len(run_config.q_levels)))
 
-        test_preds_by_bag = np.empty((x_test.shape[0], self.model_config.num_bags, len(run_config.q_levels)))
         train_seasons = df_train["season"].unique()
+
+        # indices of observations in each bag; drawn from `rng` sequentially by bag number so the
+        # random sequence (and thus the resulting bags) doesn't depend on how fits are parallelized below
+        bag_obs_inds_by_bag = [
+            df_train["season"].isin(rng.choice(train_seasons,
+                                               size=int(len(train_seasons) * self.model_config.bag_frac_samples),
+                                               replace=False))
+            for _ in range(self.model_config.num_bags)
+        ]
+
+        def _fit_bag_quantile(b, q_ind, q_level):
+            bag_obs_inds = bag_obs_inds_by_bag[b]
+            # n_jobs=1: fits run concurrently across bags/quantiles via the Parallel call below, so each
+            # individual lgb fit is kept single-threaded to avoid oversubscribing CPU cores
+            model = lgb.LGBMRegressor(verbosity=-1,
+                                      objective="quantile",
+                                      alpha=q_level,
+                                      random_state=lgb_seeds[b, q_ind],
+                                      n_jobs=1)
+            model.fit(X=x_train.loc[bag_obs_inds, :], y=y_train.loc[bag_obs_inds])
+            feat_importance_df = pd.DataFrame({"feat": x_train.columns,
+                                               "importance": model.feature_importances_,
+                                               "b": b,
+                                               "q_level": q_level})
+            return model.predict(X=x_test), feat_importance_df
+
+        # fits are independent across (bag, quantile level) pairs, so run them concurrently; "threads"
+        # avoids pickling/copying x_train/y_train per task, and lightgbm releases the GIL during fitting
+        results = Parallel(n_jobs=-1, prefer="threads", verbose=10)(
+            delayed(_fit_bag_quantile)(b, q_ind, q_level)
+            for b in range(self.model_config.num_bags)
+            for q_ind, q_level in enumerate(run_config.q_levels)
+        )
+
+        test_preds_by_bag = np.empty((x_test.shape[0], self.model_config.num_bags, len(run_config.q_levels)))
         feat_importance = []
-
-        # training loop over bags
-        for b in tqdm(range(self.model_config.num_bags), "Bag number"):
-            # get indices of observations that are in bag
-            bag_seasons = rng.choice(train_seasons,
-                                     size=int(len(train_seasons) * self.model_config.bag_frac_samples),
-                                     replace=False)
-            bag_obs_inds = df_train["season"].isin(bag_seasons)
-
-            for q_ind, q_level in enumerate(run_config.q_levels):
-                # fit to bag
-                model = lgb.LGBMRegressor(verbosity=-1,
-                                          objective="quantile",
-                                          alpha=q_level,
-                                          random_state=lgb_seeds[b, q_ind])
-                model.fit(X=x_train.loc[bag_obs_inds, :], y=y_train.loc[bag_obs_inds])
-
-                feat_importance.append(pd.DataFrame({"feat": x_train.columns,
-                                                     "importance": model.feature_importances_,
-                                                     "b": b,
-                                                     "q_level": q_level}))
-                # test set predictions
-                test_preds_by_bag[:, b, q_ind] = model.predict(X=x_test)
+        result_iter = iter(results)
+        for b in range(self.model_config.num_bags):
+            for q_ind in range(len(run_config.q_levels)):
+                preds, feat_importance_df = next(result_iter)
+                test_preds_by_bag[:, b, q_ind] = preds
+                feat_importance.append(feat_importance_df)
 
         # combine and save feature importance scores
         if self.model_config.save_feat_importance:
