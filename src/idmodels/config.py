@@ -81,8 +81,8 @@ class GBQRModelConfig(ModelConfig):
     save_feat_importance: bool = False
     
     # smh trajectory filters
-    smh_model: str | None = None
-    smh_otid: str | None = None
+    smh_model: list[str] = field(default_factory=list)
+    smh_otid: list[str] = field(default_factory=list)
 
     # directional wave features (disabled by default)
     use_directional_waves: bool = False

@@ -45,10 +45,10 @@ class GBQRModel(IDModel):
         df_smh = df.loc[(df["source"].str[:4] == "smh-") & (df["wk_end_date"] < pd.Timestamp(run_config.ref_date))]
         
         # only filter for model and otid if included in the config file
-        if model_config.smh_model is not None:
-            df_smh = df_smh.loc[df_smh["source"] == f"smh-{model_config.smh_model}"]
-        if model_config.smh_otid is not None:
-            df_smh = df_smh.loc[df_smh["season"].str[9:] == model_config.smh_otid] 
+        if model_config.smh_model:
+            df_smh = df_smh.loc[df_smh["source"].isin([f"smh-{m}" for m in model_config.smh_model])]
+        if model_config.smh_otid:
+            df_smh = df_smh.loc[df_smh["season"].str[9:].isin(model_config.smh_otid)]
 
         return pd.concat([df_surveillance, df_smh], join="inner", axis=0)
 

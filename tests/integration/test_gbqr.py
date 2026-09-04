@@ -38,7 +38,7 @@ def test_gbqr_nhsn(make_run_config):
 def test_gbqr_nhsn_smh(make_run_config):
     date = datetime.date.fromisoformat("2024-12-07")
     fips_codes = ["US", "01", "06", "25", "48", "36", "56", "72"]
-    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model="NotreDame-FRED", smh_otid="010100010100", custom_name="nhsn_smh")
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"], smh_otid=["010100010100"], custom_name="nhsn_smh")
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
@@ -85,10 +85,10 @@ def test_filter_locations(make_run_config):
 
 
 @pytest.mark.parametrize("model_id, otid, row_ids", [
-    (None, None, {"surveillance", "smh_match", "smh_wrong_model", "smh_wrong_otid"}), # all SMH models and otids
-    ("NotreDame-FRED", None, {"surveillance", "smh_match", "smh_wrong_otid"}), # Restrict to single SMH model
-    (None, "010100010100", {"surveillance", "smh_match", "smh_wrong_model"}), # Restrict to a single SMH otid
-    ("NotreDame-FRED", "010100010100", {"surveillance", "smh_match"}) # Restrict to a single SMH model-otid combo
+    ([], [], {"surveillance", "smh_match", "smh_wrong_model", "smh_wrong_otid"}), # all SMH models and otids
+    (["NotreDame-FRED"], [], {"surveillance", "smh_match", "smh_wrong_otid"}), # Restrict to single SMH model
+    ([], ["010100010100"], {"surveillance", "smh_match", "smh_wrong_model"}), # Restrict to a single SMH otid
+    (["NotreDame-FRED"], ["010100010100"], {"surveillance", "smh_match"}) # Restrict to a single SMH model-otid combo
 ])
 def test_gbqr_filter_smh(make_run_config, model_id, otid, row_ids):
     """
@@ -228,7 +228,7 @@ def test_gbqr_test_set_predictions_filter_to_main_source(make_run_config):
     assert not preds_df.duplicated(subset=key_cols).any()
 
 
-def create_test_gbqr_model_config(main_source, supplementary_sources=[], smh_model=None, smh_otid=None, custom_name=None):
+def create_test_gbqr_model_config(main_source, supplementary_sources=[], smh_model=[], smh_otid=[], custom_name=None):
     name = custom_name if custom_name is not None else main_source.value
     model_config = GBQRModelConfig(
         model_name="gbqr_" + name + "_no_reporting_adj",
