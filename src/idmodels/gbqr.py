@@ -38,17 +38,43 @@ class GBQRModel(IDModel):
         self.model_config: GBQRModelConfig = model_config
 
 
+    def _resolve_smh_otid(self, df_smh: pd.DataFrame, model_config: GBQRModelConfig) -> list[str]:
+        """
+        Resolve the SMH output_type_ids (trajectory sample ids) to filter to. If smh_otid was set
+        explicitly, use it as-is. If smh_num_otid was set instead, randomly sample that many ids
+        from those available in df_smh (already filtered to smh_model, if any), since these ids
+        are arbitrary per model and not necessarily sequential or shared across models.
+        """
+        if model_config.smh_otid or not model_config.smh_num_otid:
+            return model_config.smh_otid
+
+        available = sorted(df_smh["season"].str[9:].unique())
+        if model_config.smh_num_otid > len(available):
+            raise ValueError(
+                f"smh_num_otid={model_config.smh_num_otid} exceeds the {len(available)} "
+                f"output_type_ids available for smh_model={model_config.smh_model}."
+            )
+
+        rng = np.random.default_rng(model_config.smh_otid_seed)
+        sampled = rng.choice(available, size=model_config.smh_num_otid, replace=False)
+        return sorted(sampled.tolist())
+
+
     def _filter_smh(self, df: pd.DataFrame, model_config: GBQRModelConfig, run_config: RunConfig) -> pd.DataFrame:
         # SMH source values are formatted "smh-{model_id}"; season values are formatted
         # "{season}{scenario_letter}-{output_type_id}" (see iddata.sources.smh.SMHDataSource.load).
         df_surveillance = df.loc[df["source"].str[:4] != "smh-"]
         df_smh = df.loc[(df["source"].str[:4] == "smh-") & (df["wk_end_date"] < pd.Timestamp(run_config.ref_date))]
-        
+
         # only filter for model and otid if included in the config file
         if model_config.smh_model:
             df_smh = df_smh.loc[df_smh["source"].isin([f"smh-{m}" for m in model_config.smh_model])]
-        if model_config.smh_otid:
-            df_smh = df_smh.loc[df_smh["season"].str[9:].isin(model_config.smh_otid)]
+
+        otid = self._resolve_smh_otid(df_smh, model_config)
+        # persist the resolved ids on the config for provenance/consistency across repeated calls
+        model_config.smh_otid = otid
+        if otid:
+            df_smh = df_smh.loc[df_smh["season"].str[9:].isin(otid)]
 
         return pd.concat([df_surveillance, df_smh], join="inner", axis=0)
 

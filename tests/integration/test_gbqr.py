@@ -128,6 +128,85 @@ def test_gbqr_filter_smh(make_run_config, model_id, otid, row_ids):
     assert set(filtered_df["id"]) == row_ids
 
 
+def _smh_otid_rows(otids, model_id="NotreDame-FRED"):
+    return [
+        {"id": f"smh_{otid}", "source": f"smh-{model_id}", "season": f"2024/25A-{otid}",
+         "wk_end_date": pd.Timestamp("2024-11-30")}
+        for otid in otids
+    ] + [{"id": "surveillance", "source": "nhsn", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")}]
+
+
+def test_gbqr_filter_smh_num_otid_samples_available_ids(make_run_config):
+    """
+    Unit test for GBQRModel._filter_smh: when smh_num_otid is set (instead of an explicit
+    smh_otid list), the requested number of ids is randomly sampled from those actually present
+    in the (already model-filtered) SMH rows, and the resolved ids are persisted back onto
+    model_config.smh_otid.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.SMH],
+        smh_model=["NotreDame-FRED"],
+    )
+    model_config.smh_num_otid = 2
+    model_config.smh_otid_seed = 42
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    df = pd.DataFrame(_smh_otid_rows(["a", "b", "c", "d"]))
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    kept_otids = {row_id.removeprefix("smh_") for row_id in filtered_df["id"] if row_id.startswith("smh_")}
+    assert len(kept_otids) == 2
+    assert kept_otids <= {"a", "b", "c", "d"}
+    assert "surveillance" in set(filtered_df["id"])
+    # resolved ids are persisted back onto the config, sorted
+    assert model_config.smh_otid == sorted(kept_otids)
+
+
+def test_gbqr_filter_smh_num_otid_is_reproducible_with_seed(make_run_config):
+    """Same smh_otid_seed produces the same sampled ids across separate calls."""
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    df = pd.DataFrame(_smh_otid_rows(["a", "b", "c", "d", "e"]))
+
+    def sample():
+        model_config = create_test_gbqr_model_config(
+            main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+        )
+        model_config.smh_num_otid = 3
+        model_config.smh_otid_seed = 7
+        GBQRModel(model_config)._filter_smh(df.copy(), model_config, run_config)
+        return model_config.smh_otid
+
+    assert sample() == sample()
+
+
+def test_gbqr_filter_smh_num_otid_raises_if_more_than_available(make_run_config):
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+    )
+    model_config.smh_num_otid = 5
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    df = pd.DataFrame(_smh_otid_rows(["a", "b"]))
+
+    model = GBQRModel(model_config)
+    with pytest.raises(ValueError, match="exceeds"):
+        model._filter_smh(df, model_config, run_config)
+
+
+def test_gbqr_model_config_rejects_both_smh_otid_and_smh_num_otid():
+    with pytest.raises(ValueError, match="at most one"):
+        GBQRModelConfig(
+            model_name="gbqr_bad_config",
+            main_source=SourceType.NHSN,
+            fit_locations_separately=False,
+            power_transform=PowerTransform.FOURTH_ROOT,
+            smh_otid=["010100010100"],
+            smh_num_otid=2,
+        )
+
+
 @pytest.mark.parametrize("fips_codes, nci_ids", [
     (["US", "01", "25"], []),  # states only (US national counts as a state)
     ([], ["1", "25", "99"]),  # hsas only

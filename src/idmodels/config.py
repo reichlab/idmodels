@@ -83,6 +83,10 @@ class GBQRModelConfig(ModelConfig):
     # smh trajectory filters
     smh_model: list[str] = field(default_factory=list)
     smh_otid: list[str] = field(default_factory=list)
+    # alternative to smh_otid: randomly sample this many output_type_ids from those available
+    # for smh_model, since they're arbitrary per model and not necessarily sequential
+    smh_num_otid: int | None = None
+    smh_otid_seed: int | None = None
 
     # directional wave features (disabled by default)
     use_directional_waves: bool = False
@@ -91,3 +95,9 @@ class GBQRModelConfig(ModelConfig):
     wave_max_distance_km: float = 1000.0
     wave_include_velocity: bool = False
     wave_include_aggregate: bool = True
+
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.smh_otid and self.smh_num_otid:
+            raise ValueError("Set at most one of smh_otid (an explicit list) and smh_num_otid (a random sample size).")
