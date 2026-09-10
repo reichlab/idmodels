@@ -38,26 +38,38 @@ class GBQRModel(IDModel):
         self.model_config: GBQRModelConfig = model_config
 
 
-    def _resolve_smh_otid(self, df_smh: pd.DataFrame, model_config: GBQRModelConfig) -> list[str]:
+    def _resolve_smh_otid(self, df_smh: pd.DataFrame, model_config: GBQRModelConfig) -> list[str] | pd.DataFrame:
         """
         Resolve the SMH output_type_ids (trajectory sample ids) to filter to. If smh_otid was set
-        explicitly, use it as-is. If smh_num_otid was set instead, randomly sample that many ids
-        from those available in df_smh (already filtered to smh_model, if any), since these ids
-        are arbitrary per model and not necessarily sequential or shared across models.
+        explicitly, use it as-is (applied globally, across every round/location alike). If
+        smh_num_otid was set instead, randomly sample that many ids independently within each
+        (round, location) group and return a ["round", "location", "otid"] DataFrame to join
+        against: output_type_id is NOT a globally consistent identifier across rounds -- round 4
+        shares each id across every location (a true trajectory sample), but rounds 5+ scope each
+        id to a single location (an arbitrary per-location index, disjoint from other locations'
+        ids). Sampling from the pooled, round/location-agnostic set of ids would mostly select ids
+        that only exist for one location each, starving every other location of SMH rows.
         """
         if model_config.smh_otid or not model_config.smh_num_otid:
             return model_config.smh_otid
 
-        available = sorted(df_smh["season"].str[9:].unique())
-        if model_config.smh_num_otid > len(available):
-            raise ValueError(
-                f"smh_num_otid={model_config.smh_num_otid} exceeds the {len(available)} "
-                f"output_type_ids available for smh_model={model_config.smh_model}."
-            )
-
+        df_smh = df_smh.assign(otid=df_smh["season"].str[9:])
         rng = np.random.default_rng(model_config.smh_otid_seed)
-        sampled = rng.choice(available, size=model_config.smh_num_otid, replace=False)
-        return sorted(sampled.tolist())
+
+        sampled_frames = []
+        for (r, loc), group in df_smh.groupby(["round", "location"]):
+            available = sorted(group["otid"].unique())
+            if model_config.smh_num_otid > len(available):
+                raise ValueError(
+                    f"smh_num_otid={model_config.smh_num_otid} exceeds the {len(available)} "
+                    f"output_type_ids available for round={r}, location={loc}, "
+                    f"smh_model={model_config.smh_model}."
+                )
+            sampled = rng.choice(available, size=model_config.smh_num_otid, replace=False)
+            sampled_frames.append(pd.DataFrame({"round": r, "location": loc, "otid": sampled}))
+
+        return pd.concat(sampled_frames, ignore_index=True) if sampled_frames else \
+            pd.DataFrame(columns=["round", "location", "otid"])
 
 
     def _filter_smh(self, df: pd.DataFrame, model_config: GBQRModelConfig, run_config: RunConfig) -> pd.DataFrame:
@@ -70,12 +82,17 @@ class GBQRModel(IDModel):
         if model_config.smh_model:
             df_smh = df_smh.loc[df_smh["source"].isin([f"smh-{m}" for m in model_config.smh_model])]
 
-        otid = self._resolve_smh_otid(df_smh, model_config)
-        # persist the resolved ids on the config for provenance/consistency across repeated calls
-        model_config.smh_otid = otid
-        if otid:
-            df_smh = df_smh.loc[df_smh["season"].str[9:].isin(otid)]
+        resolved = self._resolve_smh_otid(df_smh, model_config)
+        if isinstance(resolved, pd.DataFrame):
+            df_smh = df_smh.assign(otid=df_smh["season"].str[9:]) \
+                            .merge(resolved, on=["round", "location", "otid"], how="inner") \
+                            .drop(columns=["otid"])
+        elif resolved:
+            # explicit global list (smh_otid set directly): persist as-is for provenance
+            model_config.smh_otid = resolved
+            df_smh = df_smh.loc[df_smh["season"].str[9:].isin(resolved)]
 
+        df_smh = df_smh.drop(columns=["round"])
         return pd.concat([df_surveillance, df_smh], join="inner", axis=0)
 
 
@@ -107,8 +124,14 @@ class GBQRModel(IDModel):
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:
         if run_config.disease in (Disease.FLU, Disease.RSV):
             initial_feats = ["inc_trans_cs", "season_week", "log_pop"]
+            # Season-scoped grouping: prevents lag/rolling/Taylor/horizon-target features from
+            # bleeding across season boundaries. This also disambiguates SMH's overlapping
+            # scenario/output_type_id realizations, which otherwise share (source, location) and
+            # only differ by season (SMH encodes scenario+otid into the season string).
+            group_cols = ["source", "location", "season"]
         else:
             initial_feats = ["inc_trans_cs", "log_pop"]
+            group_cols = ["source", "location"]
 
         features = []
 
@@ -127,12 +150,13 @@ class GBQRModel(IDModel):
         features += [
             OneHotEncodingFeature(columns=["source", "agg_level", "location"]),
             HolidayFeature(),
-            LagFeature(columns=["inc_trans_cs"], lags=[1, 2]),
-            TaylorFeature(column="inc_trans_cs", degree=2, window_sizes=[4, 6]),
-            TaylorFeature(column="inc_trans_cs", degree=1, window_sizes=[3, 5]),
-            RollingMeanFeature(column="inc_trans_cs", window_sizes=[2, 4]),
-            LagFeature(columns=None, lags=[1, 2]),
-            HorizonTargetFeature(column="inc_trans_cs", max_horizon=run_config.max_horizon),
+            LagFeature(columns=["inc_trans_cs"], lags=[1, 2], group_columns=group_cols),
+            TaylorFeature(column="inc_trans_cs", degree=2, window_sizes=[4, 6], group_columns=group_cols),
+            TaylorFeature(column="inc_trans_cs", degree=1, window_sizes=[3, 5], group_columns=group_cols),
+            RollingMeanFeature(column="inc_trans_cs", window_sizes=[2, 4], group_columns=group_cols),
+            LagFeature(columns=None, lags=[1, 2], group_columns=group_cols),
+            HorizonTargetFeature(column="inc_trans_cs", max_horizon=run_config.max_horizon,
+                                 group_columns=group_cols),
         ]
 
         if not self.model_config.incl_level_feats:

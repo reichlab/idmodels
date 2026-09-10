@@ -109,16 +109,16 @@ def test_gbqr_filter_smh(make_run_config, model_id, otid, row_ids):
         {"id": "surveillance", "source": "nhsn", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")},
         # kept: matches configured model + output_type_id, strictly before ref_date
         {"id": "smh_match", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100",
-         "wk_end_date": pd.Timestamp("2024-11-30")},
+         "wk_end_date": pd.Timestamp("2024-11-30"), "round": 5, "location": "syn-US"},
         # dropped: wrong model_id
         {"id": "smh_wrong_model", "source": "smh-OtherModel", "season": "2024/25A-010100010100",
-         "wk_end_date": pd.Timestamp("2024-11-30")},
+         "wk_end_date": pd.Timestamp("2024-11-30"), "round": 5, "location": "syn-US"},
         # dropped: wrong output_type_id
         {"id": "smh_wrong_otid", "source": "smh-NotreDame-FRED", "season": "2024/25A-999999999999",
-         "wk_end_date": pd.Timestamp("2024-11-30")},
+         "wk_end_date": pd.Timestamp("2024-11-30"), "round": 5, "location": "syn-US"},
         # dropped: wk_end_date not strictly before ref_date
         {"id": "smh_not_before_ref_date", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100",
-         "wk_end_date": pd.Timestamp("2024-12-07")},
+         "wk_end_date": pd.Timestamp("2024-12-07"), "round": 5, "location": "syn-US"},
     ]
     df = pd.DataFrame(rows)
 
@@ -128,20 +128,27 @@ def test_gbqr_filter_smh(make_run_config, model_id, otid, row_ids):
     assert set(filtered_df["id"]) == row_ids
 
 
-def _smh_otid_rows(otids, model_id="NotreDame-FRED"):
-    return [
-        {"id": f"smh_{otid}", "source": f"smh-{model_id}", "season": f"2024/25A-{otid}",
-         "wk_end_date": pd.Timestamp("2024-11-30")}
+def _smh_otid_rows(otids, model_id="NotreDame-FRED", smh_round=5, locations=("syn-US",)):
+    """
+    Synthetic SMH rows spanning `locations` (default: a single location), each seeing the full
+    set of `otids`. output_type_id is scoped per (round, location) in real SMH data (see
+    iddata.sources.smh), so otid sampling/filtering is done within those groups.
+    """
+    rows = [
+        {"id": f"smh_{loc}_{otid}", "source": f"smh-{model_id}", "season": f"2024/25A-{otid}",
+         "wk_end_date": pd.Timestamp("2024-11-30"), "round": smh_round, "location": loc}
+        for loc in locations
         for otid in otids
-    ] + [{"id": "surveillance", "source": "nhsn", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")}]
+    ]
+    return rows + [{"id": "surveillance", "source": "nhsn", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")}]
 
 
 def test_gbqr_filter_smh_num_otid_samples_available_ids(make_run_config):
     """
     Unit test for GBQRModel._filter_smh: when smh_num_otid is set (instead of an explicit
-    smh_otid list), the requested number of ids is randomly sampled from those actually present
-    in the (already model-filtered) SMH rows, and the resolved ids are persisted back onto
-    model_config.smh_otid.
+    smh_otid list), the requested number of ids is randomly sampled independently within each
+    (round, location) group, from the ids actually present in that group's (already
+    model-filtered) SMH rows.
     """
     model_config = create_test_gbqr_model_config(
         main_source=SourceType.NHSN,
@@ -157,12 +164,34 @@ def test_gbqr_filter_smh_num_otid_samples_available_ids(make_run_config):
     model = GBQRModel(model_config)
     filtered_df = model._filter_smh(df, model_config, run_config)
 
-    kept_otids = {row_id.removeprefix("smh_") for row_id in filtered_df["id"] if row_id.startswith("smh_")}
+    kept_otids = {row_id.rsplit("_", 1)[-1] for row_id in filtered_df["id"] if row_id.startswith("smh_")}
     assert len(kept_otids) == 2
     assert kept_otids <= {"a", "b", "c", "d"}
     assert "surveillance" in set(filtered_df["id"])
-    # resolved ids are persisted back onto the config, sorted
-    assert model_config.smh_otid == sorted(kept_otids)
+    # a single-location group's sampled ids should never spill over onto smh_otid
+    # (that field is reserved for the explicit-list path)
+    assert model_config.smh_otid == []
+
+
+def test_gbqr_filter_smh_num_otid_samples_independently_per_location(make_run_config):
+    """Each (round, location) group draws its own independent sample of smh_num_otid ids."""
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+    )
+    model_config.smh_num_otid = 2
+    model_config.smh_otid_seed = 42
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    df = pd.DataFrame(_smh_otid_rows(["a", "b", "c", "d"], locations=("syn-US", "syn-01")))
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    for loc in ("syn-US", "syn-01"):
+        kept = {row_id.rsplit("_", 1)[-1] for row_id in filtered_df["id"]
+                if row_id.startswith(f"smh_{loc}_")}
+        assert len(kept) == 2
+        assert kept <= {"a", "b", "c", "d"}
 
 
 def test_gbqr_filter_smh_num_otid_is_reproducible_with_seed(make_run_config):
@@ -176,8 +205,8 @@ def test_gbqr_filter_smh_num_otid_is_reproducible_with_seed(make_run_config):
         )
         model_config.smh_num_otid = 3
         model_config.smh_otid_seed = 7
-        GBQRModel(model_config)._filter_smh(df.copy(), model_config, run_config)
-        return model_config.smh_otid
+        filtered_df = GBQRModel(model_config)._filter_smh(df.copy(), model_config, run_config)
+        return set(filtered_df["id"])
 
     assert sample() == sample()
 

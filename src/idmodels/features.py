@@ -86,18 +86,20 @@ class TaylorFeature(Feature):
             window_sizes: list[int],
             window_align: str = "trailing",
             fill_edges: bool = False,
+            group_columns: list[str] | None = None,
     ):
         self.column = column
         self.degree = degree
         self.window_sizes = window_sizes
         self.window_align = window_align
         self.fill_edges = fill_edges
+        self.group_columns = group_columns if group_columns is not None else ["source", "location"]
 
 
     def apply(self, df: pd.DataFrame, feat_names: list[str]) -> tuple[pd.DataFrame, list[str]]:
         df, new_feat_names = featurize.featurize_data(
             df,
-            group_columns=["source", "location"],
+            group_columns=self.group_columns,
             features=[
                 {
                     "fun": "windowed_taylor_coefs",
@@ -133,13 +135,12 @@ class RollingMeanFeature(Feature):
     def apply(self, df: pd.DataFrame, feat_names: list[str]) -> tuple[pd.DataFrame, list[str]]:
         df, new_feat_names = featurize.featurize_data(
             df,
-            group_columns=["source", "location"],
+            group_columns=self.group_columns,
             features=[
                 {
                     "fun": "rollmean",
                     "args": {
                         "columns": self.column,
-                        "group_columns": self.group_columns,
                         "window_size": self.window_sizes,
                     },
                 }
@@ -158,9 +159,10 @@ class LagFeature(Feature):
     """
 
 
-    def __init__(self, columns: list[str] | None, lags: list[int]):
+    def __init__(self, columns: list[str] | None, lags: list[int], group_columns: list[str] | None = None):
         self.columns = columns
         self.lags = lags
+        self.group_columns = group_columns if group_columns is not None else ["source", "location"]
 
 
     def apply(self, df: pd.DataFrame, feat_names: list[str]) -> tuple[pd.DataFrame, list[str]]:
@@ -168,7 +170,7 @@ class LagFeature(Feature):
             raise ValueError("LagFeature.columns must be resolved by FeaturePipeline before calling apply().")
         df, new_feat_names = featurize.featurize_data(
             df,
-            group_columns=["source", "location"],
+            group_columns=self.group_columns,
             features=[
                 {
                     "fun": "lag",
@@ -190,15 +192,16 @@ class HorizonTargetFeature(Feature):
     """
 
 
-    def __init__(self, column: str, max_horizon: int):
+    def __init__(self, column: str, max_horizon: int, group_columns: list[str] | None = None):
         self.column = column
         self.max_horizon = max_horizon
+        self.group_columns = group_columns if group_columns is not None else ["source", "location"]
 
 
     def apply(self, df: pd.DataFrame, feat_names: list[str]) -> tuple[pd.DataFrame, list[str]]:
         df, new_feat_names = featurize.featurize_data(
             df,
-            group_columns=["source", "location"],
+            group_columns=self.group_columns,
             features=[
                 {
                     "fun": "horizon_targets",
@@ -418,7 +421,8 @@ class FeaturePipeline:
             feat_names_before = list(feat_names)
 
             if isinstance(feature, LagFeature) and feature.columns is None:
-                feature = LagFeature(columns=list(accumulated_new), lags=feature.lags)
+                feature = LagFeature(columns=list(accumulated_new), lags=feature.lags,
+                                     group_columns=feature.group_columns)
 
             df, feat_names = feature.apply(df, feat_names)
             new_this_step = [f for f in feat_names if f not in feat_names_before]
