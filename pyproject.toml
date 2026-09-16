@@ -11,7 +11,8 @@ classifiers = [
 dynamic = ["version"]
 
 dependencies = [
-    "iddata @ git+https://github.com/reichlab/iddata@cb6b699ab17ff5dead7d4ed193dfe80df3edb50b",
+    "iddata @ git+https://github.com/reichlab/iddata@1d07922f01164ce338519b82c418511a0583c1f0",
+    "joblib",
     "lightgbm",
     "numpy",
     "pandas~=2.0",  # pandas 3.0 breaks compatibility; remove cap once validated
