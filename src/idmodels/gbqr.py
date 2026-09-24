@@ -43,12 +43,17 @@ class GBQRModel(IDModel):
         Resolve the SMH output_type_ids (trajectory sample ids) to filter to. If smh_otid was set
         explicitly, use it as-is (applied globally, across every round/location alike). If
         smh_num_otid was set instead, randomly sample that many ids independently within each
-        (round, location) group and return a ["round", "location", "otid"] DataFrame to join
-        against: output_type_id is NOT a globally consistent identifier across rounds -- round 4
-        shares each id across every location (a true trajectory sample), but rounds 5+ scope each
-        id to a single location (an arbitrary per-location index, disjoint from other locations'
-        ids). Sampling from the pooled, round/location-agnostic set of ids would mostly select ids
-        that only exist for one location each, starving every other location of SMH rows.
+        (round, location, source) group and return a ["round", "location", "source", "otid"]
+        DataFrame to join against: output_type_id is NOT a globally consistent identifier across
+        rounds -- round 4 shares each id across every location (a true trajectory sample), but
+        rounds 5+ scope each id to a single location (an arbitrary per-location index, disjoint
+        from other locations' ids). Sampling from the pooled, round/location-agnostic set of ids
+        would mostly select ids that only exist for one location each, starving every other
+        location of SMH rows. Grouping must also include `source` (the SMH model): otid values are
+        independently assigned per model and are not unique across models within a (round,
+        location) group, so pooling across models before sampling -- or joining the sampled ids
+        back on (round, location) alone -- would let one sampled id match unrelated rows from every
+        other model that happens to reuse that same id string.
         """
         if model_config.smh_otid or not model_config.smh_num_otid:
             return model_config.smh_otid
@@ -57,19 +62,19 @@ class GBQRModel(IDModel):
         rng = np.random.default_rng(model_config.smh_otid_seed)
 
         sampled_frames = []
-        for (r, loc), group in df_smh.groupby(["round", "location"]):
+        for (r, loc, src), group in df_smh.groupby(["round", "location", "source"]):
             available = sorted(group["otid"].unique())
             if model_config.smh_num_otid > len(available):
                 raise ValueError(
                     f"smh_num_otid={model_config.smh_num_otid} exceeds the {len(available)} "
-                    f"output_type_ids available for round={r}, location={loc}, "
+                    f"output_type_ids available for round={r}, location={loc}, source={src}, "
                     f"smh_model={model_config.smh_model}."
                 )
             sampled = rng.choice(available, size=model_config.smh_num_otid, replace=False)
-            sampled_frames.append(pd.DataFrame({"round": r, "location": loc, "otid": sampled}))
+            sampled_frames.append(pd.DataFrame({"round": r, "location": loc, "source": src, "otid": sampled}))
 
         return pd.concat(sampled_frames, ignore_index=True) if sampled_frames else \
-            pd.DataFrame(columns=["round", "location", "otid"])
+            pd.DataFrame(columns=["round", "location", "source", "otid"])
 
 
     def _filter_smh(self, df: pd.DataFrame, model_config: GBQRModelConfig, run_config: RunConfig) -> pd.DataFrame:
@@ -85,7 +90,7 @@ class GBQRModel(IDModel):
         resolved = self._resolve_smh_otid(df_smh, model_config)
         if isinstance(resolved, pd.DataFrame):
             df_smh = df_smh.assign(otid=df_smh["season"].str[9:]) \
-                            .merge(resolved, on=["round", "location", "otid"], how="inner") \
+                            .merge(resolved, on=["round", "location", "source", "otid"], how="inner") \
                             .drop(columns=["otid"])
         elif resolved:
             # explicit global list (smh_otid set directly): persist as-is for provenance

@@ -194,6 +194,50 @@ def test_gbqr_filter_smh_num_otid_samples_independently_per_location(make_run_co
         assert kept <= {"a", "b", "c", "d"}
 
 
+def test_gbqr_filter_smh_num_otid_samples_independently_per_model(make_run_config):
+    """
+    Regression test: output_type_id is assigned independently per SMH model and is NOT a globally
+    unique identifier within a (round, location) group -- two different models can reuse the same
+    otid string. When no smh_model filter narrows the source down to one model (smh_model=[], the
+    "all models" case), sampling must draw smh_num_otid ids *per model*, not from a single pool
+    shared across models: pooling before sampling (and then joining back on (round, location, otid)
+    alone) would let a sampled id incidentally match rows from every model that happens to reuse
+    that id string, and could just as easily fail to match a given model's rows at all, starving
+    that model even though smh_num_otid ids were "sampled".
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=[],
+    )
+    model_config.smh_num_otid = 2
+    model_config.smh_otid_seed = 42
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    # model_a has 4 ids to sample from; model_b reuses 2 of the SAME id strings and has no others.
+    # A pooled (round, location)-only sample of 2 ids could easily miss both of model_b's ids
+    # entirely (e.g. sampling "c"/"d"), which would incorrectly starve model_b of any SMH rows.
+    rows = (
+        _smh_otid_rows(["a", "b", "c", "d"], model_id="model_a")
+        + _smh_otid_rows(["a", "b"], model_id="model_b")
+    )
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    def kept_otids_for(model_id):
+        model_rows = filtered_df[filtered_df["source"] == f"smh-{model_id}"]
+        return {row_id.rsplit("_", 1)[-1] for row_id in model_rows["id"]}
+
+    kept_a = kept_otids_for("model_a")
+    kept_b = kept_otids_for("model_b")
+
+    # model_b only has 2 ids available, so with smh_num_otid=2 it must always retain exactly both
+    assert kept_b == {"a", "b"}
+    # model_a independently samples 2 of its own 4 ids, regardless of what was drawn for model_b
+    assert len(kept_a) == 2
+    assert kept_a <= {"a", "b", "c", "d"}
+
+
 def test_gbqr_filter_smh_num_otid_is_reproducible_with_seed(make_run_config):
     """Same smh_otid_seed produces the same sampled ids across separate calls."""
     run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
