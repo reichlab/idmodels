@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `idmodels.peak`: direct models for the FluSight seasonal targets `peak week inc flu hosp` (pmf) and `peak inc flu hosp` (quantiles): `PeakBaselineModel` (conditional climatology), `PeakGBQRModel` (LightGBM quantile regression + multiclass timing, bagged over seasons) and `PeakKCDEModel` (kernel conditional density / analog model), configured with `PeakBaselineModelConfig`, `PeakGBQRModelConfig` and `PeakKCDEModelConfig`
+- Season-replay training set construction from NHSN, ILINet and FluSurvNet seasons (`idmodels.peak.series`)
+- NHSN data-revision model (`idmodels.peak.revision`): block bootstrap of revision vectors estimated from NHSN vintages; peak forecasts propagate revision uncertainty by Monte Carlo so that past weeks that could be revised into the peak receive probability, and every peak-week probability is floored (`PeakModelConfig.pmf_floor`)
+- `PeakGBQRModelConfig.size_offset` (default `False`): optionally boost each peak-size quantile regression from the conditional-climatology baseline's quantile
+
 ## [2.1.0]
 
 ### Added
