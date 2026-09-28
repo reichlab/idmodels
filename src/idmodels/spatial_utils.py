@@ -13,22 +13,13 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 # Direction angles (degrees, 0° = North, clockwise)
-DIRECTION_ANGLES = {
-    "N": 0,
-    "NE": 45,
-    "E": 90,
-    "SE": 135,
-    "S": 180,
-    "SW": 225,
-    "W": 270,
-    "NW": 315
-}
+DIRECTION_ANGLES = {"N": 0, "NE": 45, "E": 90, "SE": 135, "S": 180, "SW": 225, "W": 270, "NW": 315}
 
 # Cone width for each direction (degrees)
 CONE_WIDTH = 45.0  # ±22.5° around center
 
 # Cache for loaded centroid data
-_CENTROID_CACHE = {}
+_CENTROID_CACHE: dict = {}
 
 
 def _load_state_centroids() -> Dict[str, Tuple[float, float]]:
@@ -50,7 +41,8 @@ def _load_state_centroids() -> Dict[str, Tuple[float, float]]:
             df = pd.read_csv(f, dtype={"fips": str})
     except AttributeError:
         # Python 3.7-3.8 fallback
-        import pkg_resources
+        import pkg_resources  # type: ignore[import-untyped]
+
         csv_path = pkg_resources.resource_filename("idmodels", "data/state_centroids.csv")
         df = pd.read_csv(csv_path, dtype={"fips": str})
 
@@ -103,8 +95,7 @@ def get_location_centroids(agg_level: str = "state") -> Dict[str, Tuple[float, f
         )
 
 
-def haversine_distance(coord1: Tuple[float, float],
-                       coord2: Tuple[float, float]) -> float:
+def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
     """
     Calculate the great circle distance between two points on Earth.
 
@@ -129,7 +120,7 @@ def haversine_distance(coord1: Tuple[float, float],
     # Haversine formula
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     c = 2 * math.asin(math.sqrt(a))
 
     # Earth's radius in kilometers
@@ -138,8 +129,7 @@ def haversine_distance(coord1: Tuple[float, float],
     return c * r
 
 
-def compute_bearing(coord1: Tuple[float, float],
-                    coord2: Tuple[float, float]) -> float:
+def compute_bearing(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
     """
     Calculate the bearing (direction) from coord1 to coord2.
 
@@ -176,11 +166,11 @@ def compute_bearing(coord1: Tuple[float, float],
 
 
 def get_directional_neighbors(
-        origin_loc: str,
-        origin_coord: Tuple[float, float],
-        all_coords: Dict[str, Tuple[float, float]],
-        direction: str,
-        max_distance_km: float
+    origin_loc: str,
+    origin_coord: Tuple[float, float],
+    all_coords: Dict[str, Tuple[float, float]],
+    direction: str,
+    max_distance_km: float,
 ) -> List[Tuple[str, float]]:
     """
     Find neighbors of origin location within a directional cone.
@@ -211,8 +201,7 @@ def get_directional_neighbors(
     """
     if direction not in DIRECTION_ANGLES:
         raise ValueError(
-            f"Invalid direction '{direction}'. "
-            f"Must be one of: {', '.join(sorted(DIRECTION_ANGLES.keys()))}"
+            f"Invalid direction '{direction}'. " f"Must be one of: {', '.join(sorted(DIRECTION_ANGLES.keys()))}"
         )
 
     direction_angle = DIRECTION_ANGLES[direction]
@@ -274,8 +263,7 @@ def validate_wave_directions(wave_directions: List[str]) -> None:
     for direction in wave_directions:
         if direction not in valid_directions:
             raise ValueError(
-                f"Invalid direction '{direction}'. "
-                f"Must be one of: {', '.join(sorted(valid_directions))}"
+                f"Invalid direction '{direction}'. " f"Must be one of: {', '.join(sorted(valid_directions))}"
             )
 
     # Check for opposite direction pairs (potential multicollinearity warning)
@@ -289,5 +277,5 @@ def validate_wave_directions(wave_directions: List[str]) -> None:
                 f"In datasets with uniform spatial patterns, opposite directions may be correlated. "
                 f"Consider checking correlation if multicollinearity is a concern "
                 f"(note: tree-based models like GBQR are robust to multicollinearity).",
-                UserWarning
+                UserWarning,
             )

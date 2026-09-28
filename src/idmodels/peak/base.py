@@ -22,6 +22,7 @@ from iddata.loader import DiseaseDataLoader
 from iddata.sources.flusurvnet import FluSurvNetDataSource
 from iddata.sources.ilinet import ILINetDataSource
 from iddata.sources.nhsn import NHSNDataSource
+from iddata.sources.nssp import NSSPDataSource
 from iddata.utils import add_season_columns
 
 from idmodels.config import PeakModelConfig, RunConfig, SourceType
@@ -30,9 +31,9 @@ from idmodels.peak.series import (
     LOG_EPS,
     N_SEASON_WEEKS,
     SOURCE_CODES,
-    SeasonArrays,
     build_replay_rows,
     build_season_arrays,
+    cumulative_curves,
     historical_log_peaks,
     peak_week_climatology,
     state_features,
@@ -51,6 +52,21 @@ class PeakInputs:
 
     data: pd.DataFrame  # iddata output for NHSN and supplementary sources (rates), with pop
     vintages: pd.DataFrame  # all NHSN vintages (counts) released on or before the reference date
+
+
+@dataclass
+class CurrentSeason:
+    """The current season as reported on the forecast date, one row per forecast location."""
+
+    reported: np.ndarray  # (n_loc, N_SEASON_WEEKS) reported values in source units; weeks not yet reported are NaN
+    t: np.ndarray  # (n_loc,) current season week: the last reported week + 1
+    locations: list[str]
+    source: str
+    eps: float
+    hist_peak: np.ndarray  # (n_loc,) mean log(peak + eps) of the location's earlier seasons of this source (or NaN)
+    nat_row: int  # row of the national series (-1 if none)
+    hist_total: np.ndarray | None = None  # (n_loc,) mean season total in earlier seasons (see series.state_features)
+    hist_cum: np.ndarray | None = None  # (n_loc, N_SEASON_WEEKS) mean cumulative curve in earlier seasons
 
 
 def season_of(date: datetime.date) -> str:
@@ -105,23 +121,35 @@ class PeakModel(ABC):
                     src_objs.append(ILINetDataSource())
                 elif s == SourceType.FLUSURVNET:
                     src_objs.append(FluSurvNetDataSource())
+                elif s == SourceType.NSSP:
+                    continue  # loaded separately below
                 else:
                     raise ValueError(f"unsupported source for peak models: {s}")
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                _DATA_CACHE[key] = DiseaseDataLoader().load(
-                    sources=src_objs, as_of=ref_date, ancillary=[PopulationData()]
-                )
+                data = DiseaseDataLoader().load(sources=src_objs, as_of=ref_date, ancillary=[PopulationData()])
+                if SourceType.NSSP in sources:
+                    data = pd.concat([data, self._load_nssp(ref_date)], ignore_index=True)
+            _DATA_CACHE[key] = data
         return PeakInputs(data=_DATA_CACHE[key], vintages=load_nhsn_vintages(ref_date))
+
+    @staticmethod
+    def _load_nssp(ref_date: datetime.date) -> pd.DataFrame:
+        """
+        NSSP state and national series (percent of ED visits for influenza) for seasons strictly before the season of
+        ref_date, used for training only. iddata only has NSSP snapshots from 2025-09-17 on, so earlier reference
+        dates use the earliest snapshot; dropping the current and later seasons here keeps any data that was not
+        available on ref_date out of the inputs.
+        """
+        as_of = max(ref_date, datetime.date(2025, 9, 17))
+        nssp = DiseaseDataLoader().load(sources=[NSSPDataSource()], as_of=as_of, ancillary=[PopulationData()])
+        nssp = nssp.loc[nssp["agg_level"].isin(["state", "national"]) & (nssp["season"] < season_of(ref_date))]
+        return nssp.dropna(subset=["season_week"])
 
     def forecast(self, inputs: PeakInputs, run_config: RunConfig) -> pd.DataFrame:
         """Hub-formatted peak week pmf and peak size quantile forecasts for run_config.ref_date."""
-        cfg = self.model_config
         season = season_of(run_config.ref_date)
-        self.size_levels = np.asarray(run_config.q_levels, dtype=float)
-        self.kmax = cfg.window_end_week - 1
-
-        self._fit_if_needed(inputs, season, run_config)
+        self.fit(inputs.data, season, run_config.q_levels)
         rng = np.random.default_rng(int(calendar.timegm(run_config.ref_date.timetuple())))
         pmf, quantiles, locations = self._predict_current_season(inputs, season, run_config, rng)
         return self._format_output(pmf, quantiles, locations, season, run_config)
@@ -145,21 +173,34 @@ class PeakModel(ABC):
     # ---------------------------------------------------------------------------------------------------------------
     # training
 
-    def _training_arrays(self, inputs: PeakInputs, season: str) -> SeasonArrays:
-        data = inputs.data.loc[inputs.data["season"] < season]
-        return build_season_arrays(data)
-
-    def _fit_if_needed(self, inputs: PeakInputs, season: str, run_config: RunConfig) -> None:
+    def fit(self, data: pd.DataFrame, season: str, q_levels) -> None:
         """
-        Training uses only seasons before the current one, so the fit only changes when the season does (up to minor
-        revisions to earlier seasons' data). Refit once per (season, quantile levels).
+        Fit to all seasons of `data` (long-format iddata output, any sources) strictly before `season`. The fit only
+        changes when the season does (up to minor revisions to earlier seasons' data), so it is repeated only when
+        (season, quantile levels) changes.
         """
+        cfg = self.model_config
+        self.size_levels = np.asarray(q_levels, dtype=float)
+        self.kmax = cfg.window_end_week - 1
         key = (season, tuple(self.size_levels))
         if self._fitted_key == key:
             return
-        cfg = self.model_config
-        arrays = self._training_arrays(inputs, season)
+        train = data.loc[data["season"] < season]
+        excluded = pd.MultiIndex.from_tuples(cfg.exclude_training_series) if cfg.exclude_training_series else None
+        if excluded is not None:
+            train = train.loc[~pd.MultiIndex.from_arrays([train["source"], train["location"]]).isin(excluded)]
+        arrays = build_season_arrays(train)
         self.hist_ = historical_log_peaks(arrays, cfg.window_start_week, cfg.window_end_week, cfg.min_window_obs)
+        # mean season total and cumulative curve per (source, location) over the complete training series
+        complete = arrays.subset(
+            arrays.keys.set_index(["source", "location", "season"]).index.isin(
+                self.hist_.set_index(["source", "location", "season"]).index
+            )
+        )
+        total, curves = cumulative_curves(complete.y, cfg.window_end_week)
+        src_loc = (complete.keys["source"] + "|" + complete.keys["location"]).to_numpy()
+        self.hist_total_ = pd.Series(total).groupby(src_loc).mean()
+        self.hist_cum_ = pd.DataFrame(curves).groupby(src_loc).mean()
         self.clim_ = peak_week_climatology(
             self.hist_, cfg.window_start_week, cfg.window_end_week, smoothing_sd=cfg.timing_smoothing_sd
         )
@@ -216,7 +257,6 @@ class PeakModel(ABC):
         self, inputs: PeakInputs, season: str, run_config: RunConfig, rng: np.random.Generator
     ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         cfg = self.model_config
-        w0, w1 = cfg.window_start_week, cfg.window_end_week
         locations = [loc for loc in run_config.states]
         counts, pop = self._current_counts(inputs, season, locations)
         has_data = ~np.all(np.isnan(counts), axis=1) & ~np.isnan(pop)
@@ -231,30 +271,119 @@ class PeakModel(ABC):
         rev_model = RevisionModel(max_lag=cfg.revision_max_lag).fit(inputs.vintages)
         rho = rev_model.sample(counts[np.arange(n_loc), last_week], n_draws, rng)
         revised = apply_revisions(counts, last_week, rho)  # (n_loc, n_draws, weeks)
-        rates = (revised * 1e5 / pop[:, None, None]).reshape(n_loc * n_draws, N_SEASON_WEEKS)
+        rates = revised * 1e5 / pop[:, None, None]
 
-        # series row r = loc * n_draws + draw; national features come from the US series of the same draw
+        pmf, peak_rate = self._peak_distributions(
+            rates, counts * 1e5 / pop[:, None], locations, "nhsn", nat_loc="US" if "US" in locations else None
+        )
+        peak_counts = peak_rate * pop[:, None] / 1e5
+        quantiles = np.quantile(peak_counts, run_config.q_levels, axis=1).T  # (n_loc, n_q)
+        quantiles = np.maximum.accumulate(np.round(np.maximum(quantiles, 0.0)), axis=1)
+        return pmf, quantiles, locations
+
+    def predict_series(
+        self,
+        reported: np.ndarray,
+        locations: list[str],
+        source: str,
+        nat_loc: str | None = None,
+        revision_model: RevisionModel | None = None,
+        rng: np.random.Generator | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Peak forecasts for season-aligned series of any source. Used to validate the models on sources other than
+        NHSN. `reported` (n_loc, N_SEASON_WEEKS) holds the values available at the time of the forecast, with every
+        later week missing. Without `revision_model` the reported values are taken as final; with it, the model is
+        applied to num_revision_draws simulated final versions (as for NHSN; the revision model's offset is used).
+        Call fit() first. Returns the peak week pmf over window weeks (n_loc, n_weeks) and peak size quantiles at
+        self.size_levels in the source's units (n_loc, n_q).
+        """
+        if revision_model is None:
+            rates = reported[:, None, :]
+        else:
+            n_loc, n_draws = len(locations), self.model_config.num_revision_draws
+            last_week = np.array([np.flatnonzero(~np.isnan(row)).max() for row in reported])
+            rng = rng if rng is not None else np.random.default_rng(0)
+            rho = revision_model.sample(reported[np.arange(n_loc), last_week], n_draws, rng)
+            rates = apply_revisions(reported, last_week, rho, offset=revision_model.offset)
+        pmf, peak = self._peak_distributions(rates, reported, locations, source, nat_loc=nat_loc)
+        quantiles = np.maximum.accumulate(np.quantile(peak, self.size_levels, axis=1).T, axis=1)
+        return pmf, quantiles
+
+    def _observe_current_season(self, cur: CurrentSeason) -> None:
+        """Hook for models that learn from the partially observed current season before _predict. Default: no-op."""
+
+    def _peak_distributions(
+        self, rates: np.ndarray, reported: np.ndarray, locations: list[str], source: str, nat_loc: str | None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Apply the model to Monte Carlo draws of the final current-season series.
+
+        rates: (n_loc, n_draws, N_SEASON_WEEKS) plausible final series; reported: (n_loc, N_SEASON_WEEKS) the series
+        as currently reported. The current week of each location is its last reported week + 1 (1-based season week).
+        Returns the peak week pmf over window weeks (n_loc, n_weeks), averaged over draws and floored, and samples of
+        the peak size in the units of `rates` (n_loc, n_draws * num_size_levels).
+        """
+        cfg = self.model_config
+        w0, w1 = cfg.window_start_week, cfg.window_end_week
+        n_loc, n_draws = rates.shape[:2]
+        rates = rates.reshape(n_loc * n_draws, N_SEASON_WEEKS)
+        last_week = np.array([np.flatnonzero(~np.isnan(row)).max() for row in reported])
+
+        # series row r = loc * n_draws + draw; national features come from the national series of the same draw
         loc_of_row = np.repeat(np.arange(n_loc), n_draws)
         draw_of_row = np.tile(np.arange(n_draws), n_loc)
         nat_idx = np.full(n_loc * n_draws, -1)
-        if "US" in locations:
-            nat_idx = locations.index("US") * n_draws + draw_of_row
+        if nat_loc is not None:
+            nat_idx = locations.index(nat_loc) * n_draws + draw_of_row
 
-        nhsn_hist = self.hist_.loc[self.hist_["source"] == "nhsn"].groupby("location")["log_peak"].mean()
-        hist_peak = nhsn_hist.reindex(locations).to_numpy()[loc_of_row]
-        eps = np.full(n_loc * n_draws, LOG_EPS["nhsn"])
+        src_hist = self.hist_.loc[self.hist_["source"] == source].groupby("location")["log_peak"].mean()
+        hist_peak_loc = src_hist.reindex(locations).to_numpy()
+        hist_peak = hist_peak_loc[loc_of_row]
+        src_keys = [f"{source}|{loc}" for loc in locations]
+        hist_total_loc = self.hist_total_.reindex(src_keys).to_numpy()
+        hist_cum_loc = self.hist_cum_.reindex(src_keys).to_numpy()
+        pool = np.asarray([loc != nat_loc for loc in locations])
+        eps = np.full(n_loc * n_draws, LOG_EPS[source])
+
+        self._observe_current_season(
+            CurrentSeason(
+                reported=reported,
+                t=last_week + 1,
+                locations=list(locations),
+                source=source,
+                eps=LOG_EPS[source],
+                hist_peak=hist_peak_loc,
+                nat_row=locations.index(nat_loc) if nat_loc is not None else -1,
+                hist_total=hist_total_loc,
+                hist_cum=hist_cum_loc,
+            )
+        )
 
         t_of_row = (last_week + 1)[loc_of_row]
         feats = pd.DataFrame(index=np.arange(n_loc * n_draws))
         for t in np.unique(t_of_row):
-            f = state_features(rates, int(t), eps, w0, nat_idx=nat_idx, hist_peak=hist_peak)
+            # synchrony features are computed across the locations of each revision draw
+            f = state_features(
+                rates,
+                int(t),
+                eps,
+                w0,
+                nat_idx=nat_idx,
+                hist_peak=hist_peak,
+                group=draw_of_row,
+                pool=pool[loc_of_row],
+                hist_total=hist_total_loc[loc_of_row],
+                hist_cum=hist_cum_loc[loc_of_row],
+            )
             sel = t_of_row == t
             for col in f.columns.drop("observed"):
                 if col not in feats:
                     feats[col] = np.nan
                 feats.loc[sel, col] = f.loc[sel, col].to_numpy()
-        feats["src_code"] = SOURCE_CODES["nhsn"]
-        feats["source"] = "nhsn"
+        feats["src_code"] = SOURCE_CODES[source]
+        feats["source"] = source
+        feats["location"] = np.asarray(locations)[loc_of_row]
 
         timing, size = self._predict(feats)
 
@@ -281,19 +410,14 @@ class PeakModel(ABC):
         pmf = np.maximum(pmf, cfg.pmf_floor)
         pmf = pmf / pmf.sum(axis=1, keepdims=True)
 
-        # ---- peak size quantiles (counts)
+        # ---- peak size samples
         n_u = cfg.num_size_levels
         u = (np.arange(n_u) + 0.5) / n_u
         z = np.stack([np.interp(u, self.size_levels, np.sort(row)) for row in size])  # (rows, n_u)
         z = np.where((t_of_row >= w0)[:, None], np.maximum(z, 0.0), z)
         lm = feats["lm"].to_numpy()[:, None]
-        peak_rate = np.maximum(np.exp(lm + z) - LOG_EPS["nhsn"], 0.0)
-        peak_counts = peak_rate * pop[loc_of_row][:, None] / 1e5
-        peak_counts = peak_counts.reshape(n_loc, n_draws * n_u)
-        quantiles = np.quantile(peak_counts, run_config.q_levels, axis=1).T  # (n_loc, n_q)
-        quantiles = np.maximum.accumulate(np.round(np.maximum(quantiles, 0.0)), axis=1)
-
-        return pmf, quantiles, locations
+        peak = np.maximum(np.exp(lm + z) - LOG_EPS[source], 0.0)
+        return pmf, peak.reshape(n_loc, n_draws * n_u)
 
     def _format_output(
         self, pmf: np.ndarray, quantiles: np.ndarray, locations: list[str], season: str, run_config: RunConfig

@@ -35,7 +35,18 @@ ALL_FEATURES = [
     "nat_g3",
     "src_code",
 ]
-SOURCE_CODES = {"nhsn": 0, "ilinet": 1, "flusurvnet": 2}
+# synchrony (other locations of the same source, season and draw) and burden-to-date features; optional in the models
+SYNC_BURDEN_FEATURES = [
+    "sync_med_rel_max",
+    "sync_med_g3",
+    "sync_frac_past2",
+    "sync_frac_half",
+    "cum_vs_hist_total",
+    "cum_vs_hist_same_week",
+]
+# cumulative incidence is summed from this season week on (matching `cum_rel`)
+CUM_START_WEEK = 5
+SOURCE_CODES = {"nhsn": 0, "ilinet": 1, "flusurvnet": 2, "nssp": 3}
 
 
 @dataclass
@@ -135,11 +146,21 @@ def state_features(
     window_start: int,
     nat_idx: np.ndarray | None = None,
     hist_peak: np.ndarray | None = None,
+    group: np.ndarray | None = None,
+    pool: np.ndarray | None = None,
+    hist_total: np.ndarray | None = None,
+    hist_cum: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """
     Features describing each season as observed through season week t (the most recent observed week). Only
     y[:, :t] is used, so there is no look-ahead. Also returns the helper columns `lm` (log of M_t + eps) and
     `max_week` needed to map relative predictions back to the season.
+
+    Synchrony features (SYNC_BURDEN_FEATURES) summarize, for each row, the rows with the same `group` value (series
+    of the same source and season, or of the same revision draw) that are in `pool` (non-national series) and observed
+    at t; the row itself is included if it qualifies. Burden features compare cumulative incidence to date with
+    `hist_total` (mean total incidence over weeks CUM_START_WEEK..window end in earlier seasons of the same source and
+    location) and `hist_cum` (n, N_SEASON_WEEKS: mean cumulative incidence through each week in those seasons).
     """
     n = y.shape[0]
     yf = _ffill(y[:, :t])
@@ -157,7 +178,7 @@ def state_features(
     with warnings.catch_warnings():  # all-missing rows (no data yet this season) give NaN, as intended
         warnings.simplefilter("ignore", category=RuntimeWarning)
         recent_mean = np.nanmean(recent, axis=1)
-    cum = np.nansum(y[:, 4:t], axis=1) if t > 4 else np.nansum(y[:, :t], axis=1)
+    cum = np.nansum(y[:, CUM_START_WEEK - 1 : t], axis=1) if t >= CUM_START_WEEK else np.nansum(y[:, :t], axis=1)
     feats = pd.DataFrame(
         {
             "season_week": np.full(n, float(t)),
@@ -184,6 +205,38 @@ def state_features(
         feats["nat_rel_max"] = np.nan
         feats["nat_wks_since_max"] = np.nan
         feats["nat_g3"] = np.nan
+
+    # synchrony across locations
+    for col in SYNC_BURDEN_FEATURES[:4]:
+        feats[col] = np.nan
+    if group is not None:
+        use = np.asarray(pool if pool is not None else np.ones(n, bool)) & feats["observed"].to_numpy()
+        d = pd.DataFrame(
+            {
+                "group": np.asarray(group)[use],
+                "rel_max": feats["rel_max"].to_numpy()[use],
+                "g3": feats["g3"].to_numpy()[use],
+                "past2": (feats["wks_since_max"].to_numpy()[use] >= 2) & (t >= window_start),
+                "half": feats["rel_max"].to_numpy()[use] >= np.log(0.5),
+            }
+        )
+        agg = d.groupby("group").agg(
+            sync_med_rel_max=("rel_max", "median"),
+            sync_med_g3=("g3", "median"),
+            sync_frac_past2=("past2", "mean"),
+            sync_frac_half=("half", "mean"),
+        )
+        idx = agg.reindex(np.asarray(group))
+        for col in agg.columns:
+            feats[col] = idx[col].to_numpy(dtype=float)
+
+    # burden to date relative to the location's earlier seasons
+    log_cum = np.log(cum + eps)
+    feats["cum_vs_hist_total"] = log_cum - np.log(hist_total + eps) if hist_total is not None else np.nan
+    if hist_cum is not None:
+        feats["cum_vs_hist_same_week"] = log_cum - np.log(np.asarray(hist_cum)[:, t - 1] + eps)
+    else:
+        feats["cum_vs_hist_same_week"] = np.nan
     return feats
 
 
@@ -194,7 +247,33 @@ def historical_log_peaks(arrays: SeasonArrays, window_start: int, window_end: in
     out = arrays.keys[["source", "location", "season"]].copy()
     out["log_peak"] = np.log(peak + arrays.eps)
     out["peak_week"] = peak_week
-    return out.loc[n_obs >= min_window_obs].reset_index(drop=True)
+    return out.loc[(n_obs >= min_window_obs) & (peak > 0)].reset_index(drop=True)
+
+
+def cumulative_curves(y: np.ndarray, window_end: int) -> tuple[np.ndarray, np.ndarray]:
+    """Season total over weeks CUM_START_WEEK..window_end, and the cumulative curve through each week (as in
+    state_features: weeks before CUM_START_WEEK are cumulated from week 1)."""
+    z = np.nan_to_num(y)
+    cum = np.cumsum(z, axis=1)
+    from_start = cum - cum[:, [CUM_START_WEEK - 2]]  # sum over weeks CUM_START_WEEK..t
+    curves = np.where(np.arange(1, y.shape[1] + 1)[None, :] >= CUM_START_WEEK, from_start, cum)
+    return curves[:, window_end - 1], curves
+
+
+def prior_mean(keys: pd.DataFrame, values: np.ndarray) -> np.ndarray:
+    """For each series, the mean of `values` (rows aligned with keys) over strictly earlier seasons of the same source
+    and location (NaN if none). `values` may be 1- or 2-dimensional."""
+    values = np.asarray(values, dtype=float)
+    out = np.full(values.shape, np.nan)
+    order = keys.reset_index(drop=True)
+    for _, g in order.groupby(["source", "location"]):
+        idx = g.sort_values("season").index.to_numpy()
+        seasons = order.loc[idx, "season"].to_numpy()
+        for j, i in enumerate(idx):
+            prev = idx[seasons < seasons[j]]
+            if len(prev):
+                out[i] = values[prev].mean(axis=0)
+    return out
 
 
 def prior_mean_log_peak(keys: pd.DataFrame, hist: pd.DataFrame) -> np.ndarray:
@@ -221,16 +300,34 @@ def build_replay_rows(
     computed from the completed season.
     """
     n_obs = np.sum(~np.isnan(arrays.y[:, window_start - 1 : window_end]), axis=1)
-    arrays = arrays.subset(n_obs >= min_window_obs)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        positive = np.nanmax(arrays.y[:, window_start - 1 : window_end], axis=1) > 0
+    arrays = arrays.subset((n_obs >= min_window_obs) & positive)  # a series that is zero all season has no peak
     peak, peak_week = season_peaks(arrays.y, window_start, window_end)
     hist = historical_log_peaks(arrays, window_start, window_end, min_window_obs)
     hist_peak = prior_mean_log_peak(arrays.keys, hist)
     nat_idx = national_index(arrays.keys)
     eps = arrays.eps
+    total, curves = cumulative_curves(arrays.y, window_end)
+    hist_total, hist_cum = prior_mean(arrays.keys, total), prior_mean(arrays.keys, curves)
+    group = pd.factorize(arrays.keys["source"] + "|" + arrays.keys["season"])[0]
+    pool = (arrays.keys["agg_level"] != "national").to_numpy()
 
     frames = []
     for t in range(replay_start, window_end + 1):
-        feats = state_features(arrays.y, t, eps, window_start, nat_idx=nat_idx, hist_peak=hist_peak)
+        feats = state_features(
+            arrays.y,
+            t,
+            eps,
+            window_start,
+            nat_idx=nat_idx,
+            hist_peak=hist_peak,
+            group=group,
+            pool=pool,
+            hist_total=hist_total,
+            hist_cum=hist_cum,
+        )
         feats = pd.concat([arrays.keys, feats], axis=1)
         feats["z"] = np.log(peak + eps) - feats["lm"]
         feats["k"] = peak_week - t

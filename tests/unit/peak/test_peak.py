@@ -8,11 +8,12 @@ from iddata.enums import Disease
 from idmodels.config import (
     PeakBaselineModelConfig,
     PeakGBQRModelConfig,
+    PeakHierModelConfig,
     PeakKCDEModelConfig,
     RunConfig,
     SourceType,
 )
-from idmodels.peak import PeakBaselineModel, PeakGBQRModel, PeakKCDEModel
+from idmodels.peak import PeakBaselineModel, PeakGBQRModel, PeakHierModel, PeakKCDEModel
 from idmodels.peak.base import PeakInputs, season_of, season_week_to_date
 from idmodels.peak.revision import RevisionModel, apply_revisions
 from idmodels.peak.series import (
@@ -133,6 +134,27 @@ class TestSeriesHelpers:
         f2 = state_features(y2, 20, np.array([0.01]), 10)
         pd.testing.assert_frame_equal(f1, f2)
 
+    def test_sync_burden_features_do_not_look_ahead(self):
+        rng = np.random.default_rng(0)
+        y = np.stack([_curve(20 + i, 5.0 + i) for i in range(4)]) * rng.lognormal(0, 0.05, (4, 53))
+        y2 = y.copy()
+        y2[:, 22:] = y2[:, 22:] * 100 + 5  # change the future of every series
+        kw = dict(
+            group=np.array([0, 0, 0, 1]),
+            pool=np.array([True, True, False, True]),
+            hist_total=np.full(4, 50.0),
+            hist_cum=np.tile(np.linspace(0, 50, 53), (4, 1)),
+        )
+        f1 = state_features(y, 22, np.full(4, 0.01), 10, **kw)
+        f2 = state_features(y2, 22, np.full(4, 0.01), 10, **kw)
+        pd.testing.assert_frame_equal(f1, f2)
+        # group 0 pools rows 0 and 1 (row 2 is not in the pool); group 1 is row 3 alone
+        assert np.isclose(f1.loc[0, "sync_med_rel_max"], f1.loc[[0, 1], "rel_max"].median())
+        assert np.isclose(f1.loc[2, "sync_med_rel_max"], f1.loc[0, "sync_med_rel_max"])
+        assert np.isclose(f1.loc[3, "sync_med_rel_max"], f1.loc[3, "rel_max"])
+        cum = np.nansum(y[:, 4:22], axis=1)
+        assert np.allclose(f1["cum_vs_hist_total"], np.log(cum + 0.01) - np.log(50.01))
+
     def test_replay_targets(self):
         df = _long("nhsn", "US", "2022/23", _curve(25, 10.0), "national")
         rows = build_replay_rows(build_season_arrays(df), 10, 43, 5, 25)
@@ -207,6 +229,41 @@ class TestRevision:
                 max_tuning_iter=5,
             )
         ),
+        PeakGBQRModel(
+            PeakGBQRModelConfig(
+                model_name="peak_gbqr",
+                supplementary_sources=[SourceType.ILINET],
+                num_revision_draws=20,
+                num_bags=2,
+                n_estimators=10,
+                sync_burden_features=True,
+            )
+        ),
+        PeakHierModel(
+            PeakHierModelConfig(
+                model_name="peak_hier",
+                supplementary_sources=[SourceType.ILINET],
+                num_revision_draws=20,
+                num_warmup=20,
+                num_samples=20,
+                num_chains=1,
+                num_posterior_draws=10,
+                sync_burden_features=True,
+                time_varying_coefs=True,
+            )
+        ),
+        PeakHierModel(
+            PeakHierModelConfig(
+                model_name="peak_hier",
+                supplementary_sources=[SourceType.ILINET],
+                num_revision_draws=20,
+                num_warmup=20,
+                num_samples=20,
+                num_chains=1,
+                num_posterior_draws=10,
+                origin_stride=2,
+            )
+        ),
     ],
 )
 def test_forecast_is_valid_submission(model, tmp_path):
@@ -233,3 +290,16 @@ def test_forecast_is_valid_submission(model, tmp_path):
 
     # deterministic given the reference date
     pd.testing.assert_frame_equal(df, model.forecast(_synthetic_inputs(ref_date), run_config))
+
+
+def test_hier_t_survival_has_finite_hessian():
+    import jax
+
+    from idmodels.peak.hier import _log_sf
+
+    for nu in (1.5, 5.0, None):
+        for x in (-3.0, 0.0, 1e-8, 2.0):
+            h = jax.hessian(lambda s, nu=nu: _log_sf(s, nu))(x)
+            assert np.isfinite(float(h))
+    assert np.isclose(float(np.exp(_log_sf(0.0, 5.0))), 0.5, atol=1e-3)  # clamp error is O(1e-3.5) near 0
+    assert np.isclose(float(np.exp(_log_sf(1.0, 5.0))), 0.1816, atol=1e-3)

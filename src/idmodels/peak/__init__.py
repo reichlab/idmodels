@@ -3,6 +3,7 @@
 from idmodels.peak.base import PeakModel
 from idmodels.peak.baseline import PeakBaselineModel
 from idmodels.peak.gbqr import PeakGBQRModel
+from idmodels.peak.hier import PeakHierModel
 from idmodels.peak.kcde import PeakKCDEModel
 
-__all__ = ["PeakBaselineModel", "PeakGBQRModel", "PeakKCDEModel", "PeakModel"]
+__all__ = ["PeakBaselineModel", "PeakGBQRModel", "PeakHierModel", "PeakKCDEModel", "PeakModel"]

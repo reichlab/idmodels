@@ -80,8 +80,16 @@ class RevisionModel:
         strata_bounds: tuple[float, ...] = (50.0, 500.0),
         min_vectors: int = 200,
         min_stratum_vectors: int = 30,
+        offset: float = 1.0,
+        fallback_sd: float = 0.1,
     ):
+        """
+        offset: added to values before taking log ratios (1 for counts; a small value in the source's units for rates
+        or percentages). fallback_sd: lag-0 SD of the symmetric perturbation used when there is too little history.
+        """
         self.max_lag = max_lag
+        self.offset = offset
+        self.fallback_sd = fallback_sd
         self.strata_bounds = np.asarray(strata_bounds, dtype=float)
         self.min_vectors = min_vectors
         self.min_stratum_vectors = min_stratum_vectors
@@ -104,7 +112,7 @@ class RevisionModel:
         latest = eligible.groupby(["as_of", "location"])["wk_end_date"].transform("max")
         eligible = eligible.assign(lag=((latest - eligible["wk_end_date"]).dt.days // 7).astype(int))
         eligible = eligible.loc[eligible["lag"] < self.max_lag].merge(final, on=["location", "wk_end_date"])
-        eligible["rho"] = np.log((eligible["final"] + 1.0) / (eligible["inc"] + 1.0))
+        eligible["rho"] = np.log((eligible["final"] + self.offset) / (eligible["inc"] + self.offset))
 
         wide_rho = eligible.pivot_table(index=["as_of", "location"], columns="lag", values="rho")
         wide_inc = eligible.pivot_table(index=["as_of", "location"], columns="lag", values="inc")
@@ -123,7 +131,7 @@ class RevisionModel:
         if len(self.vectors) < self.min_vectors:
             # too little vintage history (e.g. early in the 2023/24 season): fall back to a small, symmetric,
             # lag-decaying perturbation so past weeks still receive some probability
-            sd = 0.1 / (1.0 + np.arange(self.max_lag))
+            sd = self.fallback_sd / (1.0 + np.arange(self.max_lag))
             return rng.normal(size=out.shape) * sd
         strata = self._stratum(lag0_counts)
         for i, s in enumerate(strata):
@@ -134,13 +142,13 @@ class RevisionModel:
         return out
 
 
-def apply_revisions(counts: np.ndarray, last_week: np.ndarray, rho: np.ndarray) -> np.ndarray:
+def apply_revisions(counts: np.ndarray, last_week: np.ndarray, rho: np.ndarray, offset: float = 1.0) -> np.ndarray:
     """
     Apply revision draws to season-aligned count arrays.
 
     counts: (n_series, n_weeks) reported counts; last_week: (n_series,) index (0-based column) of each series' most
     recent reported week; rho: (n_series, num_draws, max_lag) log revision ratios.
-    Returns (n_series, num_draws, n_weeks) revised counts, (c + 1) * exp(rho) - 1 truncated at 0.
+    Returns (n_series, num_draws, n_weeks) revised values, (c + offset) * exp(rho) - offset truncated at 0.
     """
     n, num_draws, max_lag = rho.shape
     revised = np.repeat(counts[:, None, :], num_draws, axis=1).astype(float)
@@ -149,5 +157,5 @@ def apply_revisions(counts: np.ndarray, last_week: np.ndarray, rho: np.ndarray) 
         ok = cols >= 0
         rows = np.flatnonzero(ok)
         c = counts[rows, cols[ok]]
-        revised[rows, :, cols[ok]] = np.maximum((c[:, None] + 1.0) * np.exp(rho[rows, :, j]) - 1.0, 0.0)
+        revised[rows, :, cols[ok]] = np.maximum((c[:, None] + offset) * np.exp(rho[rows, :, j]) - offset, 0.0)
     return revised

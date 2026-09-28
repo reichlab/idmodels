@@ -29,6 +29,7 @@ from tqdm import tqdm
 from idmodels.config import PeakBaselineModelConfig, PeakGBQRModelConfig
 from idmodels.peak.base import PeakModel
 from idmodels.peak.baseline import PeakBaselineModel
+from idmodels.peak.series import SYNC_BURDEN_FEATURES
 
 GBQR_FEATURES = [
     "season_week",
@@ -52,6 +53,10 @@ class PeakGBQRModel(PeakModel):
         super().__init__(model_config)
         self.model_config: PeakGBQRModelConfig = model_config
 
+    @property
+    def _features(self) -> list[str]:
+        return GBQR_FEATURES + (SYNC_BURDEN_FEATURES if self.model_config.sync_burden_features else [])
+
     def _lgb_params(self, seed: int) -> dict:
         cfg = self.model_config
         return dict(
@@ -65,7 +70,7 @@ class PeakGBQRModel(PeakModel):
     def _fit(self, rows: pd.DataFrame) -> None:
         cfg = self.model_config
         rng = np.random.default_rng(zlib.crc32(self._fitted_key_seed().encode()))
-        x = rows[GBQR_FEATURES]
+        x = rows[self._features]
         y_size = rows["z"].to_numpy()
         y_class = np.minimum(rows["timing_class"].to_numpy(), cfg.max_k + 1)
         seasons = rows["season"].unique()
@@ -113,7 +118,7 @@ class PeakGBQRModel(PeakModel):
 
     def _predict(self, feats: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
         cfg = self.model_config
-        x = feats[GBQR_FEATURES].astype(float)
+        x = feats[self._features].astype(float)
         x["src_code"] = x["src_code"].astype(int)
 
         _, offset = self._baseline._predict(feats)
