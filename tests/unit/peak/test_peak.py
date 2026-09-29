@@ -1,4 +1,5 @@
 import datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -9,11 +10,12 @@ from idmodels.config import (
     PeakBaselineModelConfig,
     PeakGBQRModelConfig,
     PeakHierModelConfig,
+    PeakHybridModelConfig,
     PeakKCDEModelConfig,
     RunConfig,
     SourceType,
 )
-from idmodels.peak import PeakBaselineModel, PeakGBQRModel, PeakHierModel, PeakKCDEModel
+from idmodels.peak import PeakBaselineModel, PeakGBQRModel, PeakHierModel, PeakHybridModel, PeakKCDEModel
 from idmodels.peak.base import PeakInputs, season_of, season_week_to_date
 from idmodels.peak.revision import RevisionModel, apply_revisions
 from idmodels.peak.series import (
@@ -239,6 +241,32 @@ class TestRevision:
                 sync_burden_features=True,
             )
         ),
+        PeakGBQRModel(
+            PeakGBQRModelConfig(
+                model_name="peak_gbqr",
+                supplementary_sources=[SourceType.ILINET],
+                num_revision_draws=20,
+                num_bags=2,
+                n_estimators=10,
+                sync_reported_only=True,
+                size_offset=True,
+                size_feature_groups=["base", "sb", "trend", "bshare"],
+                timing_feature_groups=["base", "recession", "latlon", "holiday", "h3"],
+            )
+        ),
+        PeakHybridModel(
+            PeakHybridModelConfig(
+                model_name="peak_hybrid",
+                supplementary_sources=[SourceType.ILINET],
+                num_revision_draws=20,
+                num_warmup=20,
+                num_samples=20,
+                num_chains=1,
+                num_posterior_draws=10,
+                gbqr_num_bags=4,
+                gbqr_n_estimators=10,
+            )
+        ),
         PeakHierModel(
             PeakHierModelConfig(
                 model_name="peak_hier",
@@ -303,3 +331,71 @@ def test_hier_t_survival_has_finite_hessian():
             assert np.isfinite(float(h))
     assert np.isclose(float(np.exp(_log_sf(0.0, 5.0))), 0.5, atol=1e-3)  # clamp error is O(1e-3.5) near 0
     assert np.isclose(float(np.exp(_log_sf(1.0, 5.0))), 0.1816, atol=1e-3)
+
+
+def test_gbqr_oob_predictions_exclude_own_season():
+    ref_date = datetime.date(2026, 12, 19)
+    model = PeakGBQRModel(
+        PeakGBQRModelConfig(
+            model_name="g", supplementary_sources=[SourceType.ILINET], num_bags=4, n_estimators=10, progress_bar=False
+        )
+    )
+    model.forecast(_synthetic_inputs(ref_date), _run_config(ref_date, Path("/tmp")))
+    rows = model.train_rows_
+    timing, size = model.oob_predict(rows)
+    # raw GBQR timing may sum to < 1 where tail classes fall outside the window (renormalized downstream)
+    assert timing.shape == (len(rows), model.kmax + 1) and np.all(timing.sum(axis=1) <= 1 + 1e-9)
+    assert np.all(np.diff(size, axis=1) >= 0)
+    # a season in only some bags is predicted by the others only
+    season = rows["season"].iloc[0]
+    use = np.array([season not in b for b in model.bag_seasons_])
+    if use.any() and not use.all():
+        sel = rows["season"] == season
+        t_oob, _ = model._predict(rows.loc[sel], bag_mask=np.tile(use, (sel.sum(), 1)))
+        assert np.allclose(t_oob, timing[sel.to_numpy()])
+
+
+def test_extra_features_do_not_look_ahead():
+    from idmodels.peak.extra_features import FEATURE_GROUPS, holiday_matrix
+
+    rng = np.random.default_rng(0)
+    n = 3
+    y = np.stack([_curve(20 + i, 5.0 + i) for i in range(n)]) * rng.lognormal(0, 0.05, (n, 53))
+    types = {k: rng.poisson(30, (n, 53)).astype(float) for k in ["A", "B", "H1", "H3", "H1n", "H3n"]}
+    kw = dict(holiday=holiday_matrix(["2018/19"] * n), latlon=(np.array([40.0, 35.0, np.nan]), np.zeros(n)))
+    f1 = state_features(y, 24, np.full(n, 0.01), 10, types=types, **kw)
+    y2, types2 = y.copy(), {k: v.copy() for k, v in types.items()}
+    y2[:, 24:] = y2[:, 24:] * 100 + 5
+    for v in types2.values():
+        v[:, 24:] = v[:, 24:] * 100 + 5
+    f2 = state_features(y2, 24, np.full(n, 0.01), 10, types=types2, **kw)
+    pd.testing.assert_frame_equal(f1, f2)
+    for cols in FEATURE_GROUPS.values():
+        assert set(cols) <= set(f1.columns)
+    assert f1["b_share_3wk"].notna().all() and f1["lat"].isna().sum() == 1
+
+
+def test_gbqr_size_and_timing_features_are_independent():
+    """Changing only the timing feature groups leaves the peak-size forecast unchanged, and vice versa."""
+    ref_date = datetime.date(2026, 12, 19)
+    run_config = _run_config(ref_date, Path("/tmp"))
+
+    def forecast(size_groups, timing_groups):
+        cfg = PeakGBQRModelConfig(
+            model_name="peak_gbqr",
+            supplementary_sources=[SourceType.ILINET],
+            num_revision_draws=20,
+            num_bags=2,
+            n_estimators=10,
+            progress_bar=False,
+            size_feature_groups=size_groups,
+            timing_feature_groups=timing_groups,
+        )
+        return PeakGBQRModel(cfg).forecast(_synthetic_inputs(ref_date), run_config)
+
+    a = forecast(["base", "sb"], ["base"])
+    b = forecast(["base", "sb"], ["base", "recession", "latlon"])
+    c = forecast(["base", "trend"], ["base"])
+    size, pmf = a["target"] == "peak inc flu hosp", a["output_type"] == "pmf"
+    assert np.array_equal(a.loc[size, "value"], b.loc[size, "value"])
+    assert np.allclose(a.loc[pmf, "value"], c.loc[pmf, "value"])

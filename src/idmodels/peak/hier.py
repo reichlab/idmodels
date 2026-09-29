@@ -121,8 +121,11 @@ class _Terms:
         valid = (week >= self.w0) & (week <= self.w1)
         return week, valid, week == self.w1
 
-    def log_class_probs(self, P, t, bt, x, g, r):
-        """log P(c = 0) (n,) and log P(c = m) (n, M), m = 1..M; -inf where impossible."""
+    def log_class_probs(self, P, t, bt, x, g, r, off=None):
+        """
+        log P(c = 0) (n,) and log P(c = m) (n, M), m = 1..M; -inf where impossible. `off`: optional offsets (o0 (n,),
+        oh (n, M), oz (n,)) added to the already-peaked logit and the hazard logits with coefficients P["c_off"].
+        """
         xp = self.xp
         week, valid, forced = self.week_grid(t)
         f_week = self.B["week"] @ P["a_w"]  # indexed by week - w0
@@ -140,6 +143,9 @@ class _Terms:
             + lin[:, None]
             + logm_c[None, :] * (x @ P["beta_m"])[:, None]
         )
+        if off is not None:
+            eta0 = eta0 + P["c_off"][0] * off[0]
+            eta = eta + P["c_off"][1] * off[1]
         lh = xp.where(forced, 0.0, _log_sigmoid(xp, eta))
         l1mh = xp.where(valid & ~forced, _log_sigmoid(xp, -eta), 0.0)
         before = xp.cumsum(l1mh, axis=1) - l1mh
@@ -149,11 +155,13 @@ class _Terms:
         lpm = xp.where(valid, lh + before + lnot0[:, None], -xp.inf)
         return lp0, lpm
 
-    def size_params(self, P, t_std, bt, x, g, r, logk):
-        """mu and sigma of log z given log k; logk has shape (n,) or (n, M)."""
+    def size_params(self, P, t_std, bt, x, g, r, logk, off=None):
+        """mu and sigma of the modeled transform of z given log k; logk has shape (n,) or (n, M)."""
         xp = self.xp
         expand = (lambda a: a[:, None]) if logk.ndim == 2 else (lambda a: a)
         base = bt @ P["b_t"] + x @ P["beta_z"] + P["gamma"][g, 2] + r[:, 2]
+        if off is not None:
+            base = base + P["c_off"][2] * off[2]
         mu = (
             expand(base)
             + P["b_k"][0] * (logk - self.c_k)
@@ -201,7 +209,7 @@ class PeakHierModel(PeakModel):
         w0, w1 = cfg.window_start_week, cfg.window_end_week
         self.M_ = self.kmax
         self.t_lo_ = float(cfg.replay_start_week)
-        x_raw = design_features(rows, cfg.sync_burden_features, cfg.wsm_dummies)
+        x_raw = self._design(rows)
         self.x_mu_ = x_raw.mean(axis=0).to_numpy()
         sd = x_raw.std(axis=0).to_numpy()
         self.x_sd_ = np.where(sd > 1e-6, sd, 1.0)
@@ -212,7 +220,7 @@ class PeakHierModel(PeakModel):
             # conditioned): x_w = x_s V diag(lambda^{-1/2}) from the eigendecomposition of cov(x_s); directions with
             # (near) zero variance in training are dropped (their columns are zero)
             xs = self._x(rows)
-            lam, vec = np.linalg.eigh(np.cov(xs, rowvar=False))
+            lam, vec = np.linalg.eigh(np.atleast_2d(np.cov(xs, rowvar=False)))
             keep = lam > 1e-6 * lam.max()
             self.x_white_ = vec * np.where(keep, 1.0 / np.sqrt(np.where(keep, lam, 1.0)), 0.0)[None, :]
         self.basis_ = {
@@ -230,8 +238,12 @@ class PeakHierModel(PeakModel):
         self.locations_ = sorted(rows["location"].unique())
         self.seasons_ = sorted(rows["season"].unique())
 
+    def _design(self, feats: pd.DataFrame) -> pd.DataFrame:
+        cfg = self.model_config
+        return design_features(feats, cfg.sync_burden_features, cfg.wsm_dummies)
+
     def _x(self, feats: pd.DataFrame) -> np.ndarray:
-        xs = design_features(feats, self.model_config.sync_burden_features, self.model_config.wsm_dummies).to_numpy()
+        xs = self._design(feats).to_numpy()
         xs = np.clip((xs - self.x_mu_) / self.x_sd_, -5, 5)
         return xs @ self.x_white_ if hasattr(self, "x_white_") else xs
 
@@ -279,11 +291,14 @@ class PeakHierModel(PeakModel):
             logk=jnp.asarray(np.log(np.clip(k_np, 1, None))),
             y=jnp.asarray(self._size_y(rows["z"].to_numpy())),
         )
+        off = self._training_offsets(rows)
+        if off is not None:
+            data.update(o0=jnp.asarray(off[0]), oh=jnp.asarray(off[1]), oz=jnp.asarray(off[2]))
         self.z_max_ = float(rows["z"].max()) + 1.0
         # thinning origins keeps each series' total weight: the rows of a series are near-duplicates
         weight = cfg.likelihood_weight * cfg.origin_stride
 
-        def model(t, bt, t_std, x, g, loc, sea, peaked, kidx, logk, y):
+        def model(t, bt, t_std, x, g, loc, sea, peaked, kidx, logk, y, o0=None, oh=None, oz=None):
             P = {
                 "a0": numpyro.sample("a0", dist.Normal(0, 2).expand([cfg.df_t]).to_event(1)),
                 "a_w": numpyro.sample("a_w", dist.Normal(0, 2).expand([cfg.df_week]).to_event(1)),
@@ -297,6 +312,11 @@ class PeakHierModel(PeakModel):
                 "beta_zm": numpyro.sample("beta_zm", dist.Normal(0, 0.5).expand([p]).to_event(1)),
                 "s": numpyro.sample("s", dist.Normal(0, 1).expand([3]).to_event(1)),
             }
+            off = None
+            if o0 is not None:
+                sd = cfg.offset_prior_sd
+                P["c_off"] = numpyro.sample("c_off", dist.Normal(1.0, sd).expand([3]).to_event(1))
+                off = (o0, oh, oz)
             if cfg.time_varying_coefs:
                 P["beta0_t"] = numpyro.sample("beta0_t", dist.Normal(0, 0.5).expand([p]).to_event(1))
                 P["beta_t"] = numpyro.sample("beta_t", dist.Normal(0, 0.5).expand([p]).to_event(1))
@@ -320,10 +340,10 @@ class PeakHierModel(PeakModel):
                 )
                 r = r + v[sea]
 
-            lp0, lpm = terms.log_class_probs(P, t, bt, x, g, r)
+            lp0, lpm = terms.log_class_probs(P, t, bt, x, g, r, off)
             ll_timing = jnp.where(peaked, lp0, jnp.take_along_axis(lpm, kidx[:, None], axis=1)[:, 0])
             numpyro.factor("timing", weight * jnp.sum(ll_timing))
-            mu, sigma = terms.size_params(P, t_std, bt, x, g, r, logk)
+            mu, sigma = terms.size_params(P, t_std, bt, x, g, r, logk, off)
             if self._sqrt:  # normal truncated to (0, inf)
                 ll_size = dist.Normal(mu, sigma).log_prob(y) - jax.scipy.special.log_ndtr(mu / sigma)
             else:
@@ -413,7 +433,19 @@ class PeakHierModel(PeakModel):
 
     @property
     def _tv_keys(self) -> list[str]:
-        return ["beta0_t", "beta_t"] if self.model_config.time_varying_coefs else []
+        """Optional parameter sites: time-varying coefficients and (hybrid model) offset coefficients."""
+        keys = ["beta0_t", "beta_t"] if self.model_config.time_varying_coefs else []
+        return keys + (["c_off"] if self._uses_offsets else [])
+
+    # offsets hook, used by the hybrid model (idmodels.peak.hybrid): the base model has none
+    _uses_offsets = False
+
+    def _training_offsets(self, rows: pd.DataFrame):
+        return None
+
+    def _offsets(self, feats: pd.DataFrame):
+        """(o0 (n,), oh (n, M), oz (n,)) for rows with state features `feats`, or None."""
+        return None
 
     @property
     def _sqrt(self) -> bool:
@@ -621,6 +653,7 @@ class PeakHierModel(PeakModel):
             K=f["K"].to_numpy(),
             # lower bound on the modeled transform of z (-inf when the size bound carries no information)
             y_bound=np.where(delta > (0.0 if self._sqrt else cfg.z_floor), self._size_y(delta), -np.inf),
+            off=self._offsets(f.assign(src_code=SOURCE_CODES[cur.source])),
         )
 
     def _laplace_v(self, cens: dict, rng: np.random.Generator) -> np.ndarray:
@@ -630,7 +663,7 @@ class PeakHierModel(PeakModel):
 
         cfg = self.model_config
         terms = self._terms(jnp)
-        weight = cfg.likelihood_weight
+        weight = cfg.likelihood_weight if cfg.current_update_weight is None else cfg.current_update_weight
         n = len(cens["t"])
         n_pad = int(np.ceil(n / 256) * 256)  # pad to limit recompilation
 
@@ -643,6 +676,7 @@ class PeakHierModel(PeakModel):
         mask = pad(np.ones(n))
         t, bt, t_std, x, g = pad(cens["t"], 30), pad(cens["bt"]), pad(cens["t_std"]), pad(cens["x"]), pad(cens["g"])
         K, y_bound = pad(cens["K"], 1), pad(cens["y_bound"], -np.inf)
+        off = None if cens["off"] is None else tuple(pad(o) for o in cens["off"])
         m_idx = jnp.arange(1, self.M_ + 1)
         logm = jnp.log(m_idx.astype(float))
         u_rows = jnp.asarray(self._cur_loc_u[:, cens["row"]])  # (D, n, 3)
@@ -654,8 +688,8 @@ class PeakHierModel(PeakModel):
 
         def loglik(v, P, u, nu):
             r = u + (v * comp_mask)[None, :]
-            _, lpm = terms.log_class_probs(P, t, bt, x, g, r)
-            mu, sigma = terms.size_params(P, t_std, bt, x, g, r, jnp.broadcast_to(logm, lpm.shape))
+            _, lpm = terms.log_class_probs(P, t, bt, x, g, r, off)
+            mu, sigma = terms.size_params(P, t_std, bt, x, g, r, jnp.broadcast_to(logm, lpm.shape), off)
             yb = jnp.broadcast_to(y_bound[:, None], lpm.shape)
             finite = jnp.isfinite(yb)
             std = (jnp.where(finite, yb, 0.0) - mu) / sigma
@@ -727,6 +761,7 @@ class PeakHierModel(PeakModel):
         if v_all is None:
             v_all = np.einsum("dij,dj->di", self.draws_["chol_v"], rng.standard_normal((self.n_draws_, 3)))
 
+        off = self._offsets(feats)
         S = cfg.size_samples_per_draw
         timing = np.zeros((n, self.kmax + 1))
         zs = np.zeros((n, self.n_draws_ * S))
@@ -734,7 +769,7 @@ class PeakHierModel(PeakModel):
         for d in range(self.n_draws_):
             P = self._draw(d)
             r = u_all[d][loc_idx] + v_all[d][None, :]
-            lp0, lpm = terms.log_class_probs(P, t, bt, x, g, r)
+            lp0, lpm = terms.log_class_probs(P, t, bt, x, g, r, off)
             probs = np.concatenate([np.exp(lp0)[:, None], np.exp(lpm)], axis=1)
             probs /= probs.sum(axis=1, keepdims=True)
             timing += probs
@@ -742,7 +777,7 @@ class PeakHierModel(PeakModel):
             # joint draws: class, then log z given the class
             cum = np.cumsum(probs, axis=1)
             cls = np.minimum((cum[:, None, :] < rng.random((n, S, 1))).sum(axis=2), self.M_)  # (n, S)
-            mu, sigma = terms.size_params(P, t_std, bt, x, g, r, np.broadcast_to(logm, (n, self.M_)))
+            mu, sigma = terms.size_params(P, t_std, bt, x, g, r, np.broadcast_to(logm, (n, self.M_)), off)
             m_i = np.maximum(cls - 1, 0)
             mu_s = np.take_along_axis(mu, m_i, axis=1)
             sd_s = np.take_along_axis(sigma, m_i, axis=1)

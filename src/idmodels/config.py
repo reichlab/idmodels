@@ -99,6 +99,9 @@ class PeakModelConfig:
     supplementary_sources: list[SourceType] = field(default_factory=lambda: [SourceType.ILINET, SourceType.FLUSURVNET])
     # add the synchrony and burden-to-date features (idmodels.peak.series.SYNC_BURDEN_FEATURES); used by GBQR and hier
     sync_burden_features: bool = False
+    # synchrony features count a location only if its current week was reported ("reported-at-t"), instead of also
+    # counting locations whose latest value is carried forward
+    sync_reported_only: bool = False
     # (source, location) pairs never used for training. ILINet for Puerto Rico and the US Virgin Islands is zero for
     # whole seasons or has implausible pre-season values (sparse lab testing), so it is excluded.
     exclude_training_series: list[tuple[str, str]] = field(default_factory=lambda: [("ilinet", "72"), ("ilinet", "78")])
@@ -134,6 +137,7 @@ class PeakBaselineModelConfig(PeakModelConfig):
 @dataclass
 class PeakGBQRModelConfig(PeakModelConfig):
     num_bags: int = 25
+    progress_bar: bool = True
     bag_frac_samples: float = 0.7
     # timing classes are {already peaked, 1, ..., max_k weeks ahead, more than max_k weeks ahead}
     max_k: int = 12
@@ -141,6 +145,11 @@ class PeakGBQRModelConfig(PeakModelConfig):
     # init_score) instead of the unconditional quantile. Removes implausibly wide late-season upper tails, but scored
     # slightly worse overall in the 2023/24-2025/26 hindcasts, so it is off by default.
     size_offset: bool = False
+    # feature groups for the peak-size quantile regressions and the timing classifier, from "base" (GBQR_FEATURES),
+    # "sb" (synchrony and burden) and the groups of idmodels.peak.extra_features.FEATURE_GROUPS ("trend",
+    # "recession", "holiday", "latlon", "bshare", "h3"). None: GBQR_FEATURES, plus "sb" if sync_burden_features.
+    size_feature_groups: list[str] | None = None
+    timing_feature_groups: list[str] | None = None
     # passed through to lightgbm
     n_estimators: int = 100
     learning_rate: float = 0.05
@@ -190,6 +199,9 @@ class PeakHierModelConfig(PeakModelConfig):
     # observations. Those observations all say "not yet peaked" at earlier weeks, which is lopsided evidence for
     # component 0 (in development it lowered the already-peaked probability at the peak itself).
     current_update_components: list[int] = field(default_factory=lambda: [0, 1, 2])
+    # likelihood weight of each censored current-season row (default: likelihood_weight). The censored rows are
+    # counted at every origin, so they can dominate the update; a smaller weight tempers it separately.
+    current_update_weight: float | None = None
     # z below this is set to it before taking logs
     z_floor: float = 0.01
     num_warmup: int = 500
@@ -224,3 +236,22 @@ class PeakHierModelConfig(PeakModelConfig):
     num_posterior_draws: int = 200
     size_samples_per_draw: int = 5
     laplace_iters: int = 12
+    # prior SD of the offset coefficients (hybrid model only)
+    offset_prior_sd: float = 0.5
+
+
+@dataclass
+class PeakHybridModelConfig(PeakHierModelConfig):
+    """PeakHierModel with PeakGBQRModel predictions as offsets (idmodels.peak.hybrid)."""
+
+    # weaker tempering than the hierarchical default, which scored better in development
+    likelihood_weight: float = 0.05
+    # keep the hierarchical model's own linear feature terms in addition to the offsets
+    hybrid_keep_features: bool = False
+    # internal GBQR settings (as PeakGBQRModelConfig)
+    gbqr_num_bags: int = 25
+    gbqr_bag_frac_samples: float = 0.7
+    gbqr_max_k: int = 12
+    gbqr_n_estimators: int = 100
+    gbqr_learning_rate: float = 0.05
+    gbqr_min_child_samples: int = 50

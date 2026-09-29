@@ -26,6 +26,7 @@ from iddata.sources.nssp import NSSPDataSource
 from iddata.utils import add_season_columns
 
 from idmodels.config import PeakModelConfig, RunConfig, SourceType
+from idmodels.peak.extra_features import centroids, holiday_matrix, type_arrays
 from idmodels.peak.revision import RevisionModel, apply_revisions, load_nhsn_vintages
 from idmodels.peak.series import (
     LOG_EPS,
@@ -173,11 +174,12 @@ class PeakModel(ABC):
     # ---------------------------------------------------------------------------------------------------------------
     # training
 
-    def fit(self, data: pd.DataFrame, season: str, q_levels) -> None:
+    def fit(self, data: pd.DataFrame, season: str, q_levels, strain: dict | None = None) -> None:
         """
         Fit to all seasons of `data` (long-format iddata output, any sources) strictly before `season`. The fit only
         changes when the season does (up to minor revisions to earlier seasons' data), so it is repeated only when
-        (season, quantile levels) changes.
+        (season, quantile levels) changes. `strain` (optional) maps (geography, season) to weekly A, B, A(H1), A(H3)
+        positives for the type/subtype features (idmodels.peak.extra_features.type_arrays).
         """
         cfg = self.model_config
         self.size_levels = np.asarray(q_levels, dtype=float)
@@ -205,7 +207,13 @@ class PeakModel(ABC):
             self.hist_, cfg.window_start_week, cfg.window_end_week, smoothing_sd=cfg.timing_smoothing_sd
         )
         rows = build_replay_rows(
-            arrays, cfg.window_start_week, cfg.window_end_week, cfg.replay_start_week, cfg.min_window_obs
+            arrays,
+            cfg.window_start_week,
+            cfg.window_end_week,
+            cfg.replay_start_week,
+            cfg.min_window_obs,
+            sync_reported_only=cfg.sync_reported_only,
+            strain=strain,
         )
         rows["timing_class"] = np.clip(rows["k"], 0, None).astype(int)
         self.train_rows_ = rows
@@ -274,7 +282,12 @@ class PeakModel(ABC):
         rates = revised * 1e5 / pop[:, None, None]
 
         pmf, peak_rate = self._peak_distributions(
-            rates, counts * 1e5 / pop[:, None], locations, "nhsn", nat_loc="US" if "US" in locations else None
+            rates,
+            counts * 1e5 / pop[:, None],
+            locations,
+            "nhsn",
+            nat_loc="US" if "US" in locations else None,
+            season=season,
         )
         peak_counts = peak_rate * pop[:, None] / 1e5
         quantiles = np.quantile(peak_counts, run_config.q_levels, axis=1).T  # (n_loc, n_q)
@@ -289,13 +302,16 @@ class PeakModel(ABC):
         nat_loc: str | None = None,
         revision_model: RevisionModel | None = None,
         rng: np.random.Generator | None = None,
+        season: str | None = None,
+        strain: dict | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Peak forecasts for season-aligned series of any source. Used to validate the models on sources other than
         NHSN. `reported` (n_loc, N_SEASON_WEEKS) holds the values available at the time of the forecast, with every
         later week missing. Without `revision_model` the reported values are taken as final; with it, the model is
         applied to num_revision_draws simulated final versions (as for NHSN; the revision model's offset is used).
-        Call fit() first. Returns the peak week pmf over window weeks (n_loc, n_weeks) and peak size quantiles at
+        `season` enables the holiday features and `strain` (as in fit(), counts known at the forecast date) the
+        type/subtype features. Call fit() first. Returns the peak week pmf over window weeks (n_loc, n_weeks) and peak size quantiles at
         self.size_levels in the source's units (n_loc, n_q).
         """
         if revision_model is None:
@@ -306,7 +322,9 @@ class PeakModel(ABC):
             rng = rng if rng is not None else np.random.default_rng(0)
             rho = revision_model.sample(reported[np.arange(n_loc), last_week], n_draws, rng)
             rates = apply_revisions(reported, last_week, rho, offset=revision_model.offset)
-        pmf, peak = self._peak_distributions(rates, reported, locations, source, nat_loc=nat_loc)
+        pmf, peak = self._peak_distributions(
+            rates, reported, locations, source, nat_loc=nat_loc, season=season, strain=strain
+        )
         quantiles = np.maximum.accumulate(np.quantile(peak, self.size_levels, axis=1).T, axis=1)
         return pmf, quantiles
 
@@ -314,7 +332,14 @@ class PeakModel(ABC):
         """Hook for models that learn from the partially observed current season before _predict. Default: no-op."""
 
     def _peak_distributions(
-        self, rates: np.ndarray, reported: np.ndarray, locations: list[str], source: str, nat_loc: str | None
+        self,
+        rates: np.ndarray,
+        reported: np.ndarray,
+        locations: list[str],
+        source: str,
+        nat_loc: str | None,
+        season: str | None = None,
+        strain: dict | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Apply the model to Monte Carlo draws of the final current-season series.
@@ -361,6 +386,13 @@ class PeakModel(ABC):
         )
 
         t_of_row = (last_week + 1)[loc_of_row]
+        row_locs = np.asarray(locations)[loc_of_row]
+        row_agg = np.where(row_locs == nat_loc, "national", "state")
+        holiday = holiday_matrix([season] * len(row_locs)) if season is not None else None
+        latlon = centroids(row_locs, row_agg)
+        types = None
+        if strain is not None and season is not None:
+            types = type_arrays(row_locs, row_agg, [season] * len(row_locs), strain)
         feats = pd.DataFrame(index=np.arange(n_loc * n_draws))
         for t in np.unique(t_of_row):
             # synchrony features are computed across the locations of each revision draw
@@ -375,6 +407,10 @@ class PeakModel(ABC):
                 pool=pool[loc_of_row],
                 hist_total=hist_total_loc[loc_of_row],
                 hist_cum=hist_cum_loc[loc_of_row],
+                sync_reported_only=cfg.sync_reported_only,
+                holiday=holiday,
+                latlon=latlon,
+                types=types,
             )
             sel = t_of_row == t
             for col in f.columns.drop("observed"):
