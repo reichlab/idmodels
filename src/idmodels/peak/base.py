@@ -53,6 +53,8 @@ class PeakInputs:
 
     data: pd.DataFrame  # iddata output for NHSN and supplementary sources (rates), with pop
     vintages: pd.DataFrame  # all NHSN vintages (counts) released on or before the reference date
+    # optional influenza type/subtype counts known on the reference date (see idmodels.peak.extra_features.type_arrays)
+    strain: dict | None = None
 
 
 @dataclass
@@ -150,7 +152,7 @@ class PeakModel(ABC):
     def forecast(self, inputs: PeakInputs, run_config: RunConfig) -> pd.DataFrame:
         """Hub-formatted peak week pmf and peak size quantile forecasts for run_config.ref_date."""
         season = season_of(run_config.ref_date)
-        self.fit(inputs.data, season, run_config.q_levels)
+        self.fit(inputs.data, season, run_config.q_levels, strain=inputs.strain)
         rng = np.random.default_rng(int(calendar.timegm(run_config.ref_date.timetuple())))
         pmf, quantiles, locations = self._predict_current_season(inputs, season, run_config, rng)
         return self._format_output(pmf, quantiles, locations, season, run_config)
@@ -288,6 +290,7 @@ class PeakModel(ABC):
             "nhsn",
             nat_loc="US" if "US" in locations else None,
             season=season,
+            strain=inputs.strain,
         )
         peak_counts = peak_rate * pop[:, None] / 1e5
         quantiles = np.quantile(peak_counts, run_config.q_levels, axis=1).T  # (n_loc, n_q)
