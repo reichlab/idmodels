@@ -250,8 +250,8 @@ class TestRevision:
                 n_estimators=10,
                 sync_reported_only=True,
                 size_offset=True,
-                size_feature_groups=["base", "sb", "trend", "bshare"],
-                timing_feature_groups=["base", "recession", "latlon", "holiday", "h3"],
+                size_feature_groups=["core", "sb", "trend", "bshare"],
+                timing_feature_groups=["core", "recession", "latlon", "holiday", "h3"],
             )
         ),
         PeakHybridModel(
@@ -393,9 +393,9 @@ def test_gbqr_size_and_timing_features_are_independent():
         )
         return PeakGBQRModel(cfg).forecast(_synthetic_inputs(ref_date), run_config)
 
-    a = forecast(["base", "sb"], ["base"])
-    b = forecast(["base", "sb"], ["base", "recession", "latlon"])
-    c = forecast(["base", "trend"], ["base"])
+    a = forecast(["core", "sb"], ["core"])
+    b = forecast(["core", "sb"], ["core", "recession", "latlon"])
+    c = forecast(["core", "trend"], ["core"])
     size, pmf = a["target"] == "peak inc flu hosp", a["output_type"] == "pmf"
     assert np.array_equal(a.loc[size, "value"], b.loc[size, "value"])
     assert np.allclose(a.loc[pmf, "value"], c.loc[pmf, "value"])

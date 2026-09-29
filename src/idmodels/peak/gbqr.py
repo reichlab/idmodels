@@ -64,7 +64,8 @@ class PeakGBQRModel(PeakModel):
             return self._features
         cols: list[str] = []
         for g in groups:
-            cols += GBQR_FEATURES if g == "base" else SYNC_BURDEN_FEATURES if g == "sb" else FEATURE_GROUPS[g]
+            # "core": the 13 original features ("base" is accepted as an older name)
+            cols += GBQR_FEATURES if g in ("core", "base") else SYNC_BURDEN_FEATURES if g == "sb" else FEATURE_GROUPS[g]
         return list(dict.fromkeys(cols))
 
     @property

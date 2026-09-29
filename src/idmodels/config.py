@@ -145,7 +145,7 @@ class PeakGBQRModelConfig(PeakModelConfig):
     # init_score) instead of the unconditional quantile. Removes implausibly wide late-season upper tails, but scored
     # slightly worse overall in the 2023/24-2025/26 hindcasts, so it is off by default.
     size_offset: bool = False
-    # feature groups for the peak-size quantile regressions and the timing classifier, from "base" (GBQR_FEATURES),
+    # feature groups for the peak-size quantile regressions and the timing classifier, from "core" (GBQR_FEATURES),
     # "sb" (synchrony and burden) and the groups of idmodels.peak.extra_features.FEATURE_GROUPS ("trend",
     # "recession", "holiday", "latlon", "bshare", "h3"). None: GBQR_FEATURES, plus "sb" if sync_burden_features.
     size_feature_groups: list[str] | None = None
