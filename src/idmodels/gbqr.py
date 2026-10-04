@@ -13,6 +13,7 @@ from tqdm.autonotebook import tqdm
 from idmodels.config import GBQRModelConfig, RunConfig, SourceType
 from idmodels.features import (
     DirectionalWaveFeature,
+    Feature,
     FeaturePipeline,
     HolidayFeature,
     HorizonTargetFeature,
@@ -29,19 +30,19 @@ from idmodels.utils import build_save_path
 class GBQRModel(IDModel):
     """Gradient Boosted Quantile Regression forecast model."""
 
-
     def __init__(self, model_config: GBQRModelConfig):
         # Narrow self.model_config from ModelConfig to GBQRModelConfig so that
         # type checkers resolve GBQRModelConfig-specific attributes in this class.
         super().__init__(model_config)
         self.model_config: GBQRModelConfig = model_config
 
-
     def _build_sources(self, run_config: RunConfig):
-        source_map = {SourceType.NHSN: NHSNDataSource(disease=run_config.disease),
-                      SourceType.NSSP: NSSPDataSource(disease=run_config.disease),
-                      SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
-                      SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj)}
+        source_map = {
+            SourceType.NHSN: NHSNDataSource(disease=run_config.disease),
+            SourceType.NSSP: NSSPDataSource(disease=run_config.disease),
+            SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
+            SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj),
+        }
         # concatenate + dedupe sources while preserving order so main_source is always first
         all_sources = list(dict.fromkeys([self.model_config.main_source] + self.model_config.supplementary_sources))
 
@@ -51,14 +52,13 @@ class GBQRModel(IDModel):
 
         return [source_map[s] for s in all_sources]
 
-
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:
         if run_config.disease in (Disease.FLU, Disease.RSV):
             initial_feats = ["inc_trans_cs", "season_week", "log_pop"]
         else:
             initial_feats = ["inc_trans_cs", "log_pop"]
 
-        features = []
+        features: list[Feature] = []
 
         # Create directional wave features if enabled
         if self.model_config.use_directional_waves:
@@ -88,7 +88,6 @@ class GBQRModel(IDModel):
 
         return FeaturePipeline(features=features, initial_feat_names=initial_feats)
 
-
     def _fit_and_predict(self, df: pd.DataFrame, feat_names: list[str], run_config: RunConfig) -> pd.DataFrame:
         """Fit bagged LightGBM and return long-format predictions in inc_trans_cs space."""
         # keep only rows that are in-season
@@ -104,15 +103,13 @@ class GBQRModel(IDModel):
         if self.model_config.fit_locations_separately:
             unique_ids = df_test["unique_id"].unique()
             preds_df = pd.concat(
-                [self._train_gbq_and_predict(run_config, df_train, df_test, feat_names, uid)
-                 for uid in unique_ids],
+                [self._train_gbq_and_predict(run_config, df_train, df_test, feat_names, uid) for uid in unique_ids],
                 axis=0,
             )
         else:
             preds_df = self._train_gbq_and_predict(run_config, df_train, df_test, feat_names)
 
         return preds_df
-
 
     def _train_gbq_and_predict(self, run_config, df_train, df_test, feat_names, unique_id=None):
         # filter to location if necessary
@@ -135,14 +132,20 @@ class GBQRModel(IDModel):
 
         # melt to get columns into rows, keeping only the things we need to invert data
         # transforms later on
-        cols_to_keep = ["source", "agg_level", "location", "wk_end_date", "pop", "inc_trans_cs", "horizon",
-                        "inc_trans_center_factor", "inc_trans_scale_factor"]
+        cols_to_keep = [
+            "source",
+            "agg_level",
+            "location",
+            "wk_end_date",
+            "pop",
+            "inc_trans_cs",
+            "horizon",
+            "inc_trans_center_factor",
+            "inc_trans_scale_factor",
+        ]
         preds_df = df_test_w_preds[cols_to_keep + run_config.q_labels]
         preds_df = preds_df.loc[preds_df["source"] == self.model_config.main_source.value]
-        preds_df = pd.melt(preds_df,
-                           id_vars=cols_to_keep,
-                           var_name="output_type_id",
-                           value_name="delta_hat")
+        preds_df = pd.melt(preds_df, id_vars=cols_to_keep, var_name="output_type_id", value_name="delta_hat")
 
         # value in inc_trans_cs space (before inverse transform)
         preds_df["value"] = preds_df["inc_trans_cs"] + preds_df["delta_hat"]
@@ -153,7 +156,6 @@ class GBQRModel(IDModel):
         preds_df = self._quantile_noncrossing(preds_df, gcols=gcols)
 
         return preds_df
-
 
     def _get_test_quantile_predictions(self, run_config, df_train, x_train, y_train, x_test):
         # seed for random number generation, based on reference date
@@ -169,33 +171,35 @@ class GBQRModel(IDModel):
         # training loop over bags
         for b in tqdm(range(self.model_config.num_bags), "Bag number"):
             # get indices of observations that are in bag
-            bag_seasons = rng.choice(train_seasons,
-                                     size=int(len(train_seasons) * self.model_config.bag_frac_samples),
-                                     replace=False)
+            bag_seasons = rng.choice(
+                train_seasons, size=int(len(train_seasons) * self.model_config.bag_frac_samples), replace=False
+            )
             bag_obs_inds = df_train["season"].isin(bag_seasons)
 
             for q_ind, q_level in enumerate(run_config.q_levels):
                 # fit to bag
-                model = lgb.LGBMRegressor(verbosity=-1,
-                                          objective="quantile",
-                                          alpha=q_level,
-                                          random_state=lgb_seeds[b, q_ind])
+                model = lgb.LGBMRegressor(
+                    verbosity=-1, objective="quantile", alpha=q_level, random_state=lgb_seeds[b, q_ind]
+                )
                 model.fit(X=x_train.loc[bag_obs_inds, :], y=y_train.loc[bag_obs_inds])
 
-                feat_importance.append(pd.DataFrame({"feat": x_train.columns,
-                                                     "importance": model.feature_importances_,
-                                                     "b": b,
-                                                     "q_level": q_level}))
+                feat_importance.append(
+                    pd.DataFrame(
+                        {"feat": x_train.columns, "importance": model.feature_importances_, "b": b, "q_level": q_level}
+                    )
+                )
                 # test set predictions
                 test_preds_by_bag[:, b, q_ind] = model.predict(X=x_test)
 
         # combine and save feature importance scores
         if self.model_config.save_feat_importance:
             feat_importance_df = pd.concat(feat_importance, axis=0)
-            save_path = build_save_path(root=run_config.artifact_store_root,
-                                        run_config=run_config,
-                                        model_config=self.model_config,
-                                        subdir="feat_importance")
+            save_path = build_save_path(
+                root=run_config.artifact_store_root,
+                run_config=run_config,
+                model_config=self.model_config,
+                subdir="feat_importance",
+            )
             feat_importance_df.to_csv(save_path, index=False)
 
         # combined predictions across bags: median
@@ -204,7 +208,6 @@ class GBQRModel(IDModel):
         test_pred_qs_df = pd.DataFrame(test_pred_qs)
         test_pred_qs_df.columns = run_config.q_labels
         return test_pred_qs_df
-
 
     def _quantile_noncrossing(self, preds_df: pd.DataFrame, gcols: list[str]) -> pd.DataFrame:
         # Sort rows so quantile labels are ascending within each group, then sort values the same way. Positional
