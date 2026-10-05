@@ -84,6 +84,33 @@ def test_filter_locations(make_run_config):
     assert set(filtered_df["id"]) == {"surveillance", "surveillance", "smh_match"}
 
 
+def test_filter_locations_excludes_non_state_agg_levels_matching_fips_suffix(make_run_config):
+    """
+    Regression test for GBQRModel._filter_locations: a non-state/national row whose location
+    string happens to end in a requested state's FIPS code (e.g. ILINet's HHS region row
+    "Region 10", which collides with Delaware's "10") must not be swept in alongside real
+    state-level rows.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.ILINET],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["10"], hsas=[])
+
+    rows = [
+        # kept: genuine state-level row for the requested FIPS code
+        {"id": "state_match", "agg_level": "state", "location": "10", "source": "nhsn", "season": "2024/25"},
+        # dropped: HHS region row whose location suffix collides with the requested state code
+        {"id": "region_collision", "agg_level": "hhs region", "location": "Region 10", "source": "ilinet", "season": "2024/25"},
+    ]
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_locations(df, run_config)
+
+    assert set(filtered_df["id"]) == {"state_match"}
+
+
 @pytest.mark.parametrize("model_id, otid, row_ids", [
     ([], [], {"surveillance", "smh_match", "smh_wrong_model", "smh_wrong_otid"}), # all SMH models and otids
     (["NotreDame-FRED"], [], {"surveillance", "smh_match", "smh_wrong_otid"}), # Restrict to single SMH model
