@@ -373,6 +373,41 @@ def test_gbqr_feature_pipeline_does_not_bleed_across_smh_trajectories(make_run_c
         assert traj["inc_trans_cs_lag1"].iloc[1:].tolist() == [base, base + 1, base + 2]
 
 
+def test_gbqr_filter_smh_num_otid_samples_independently_per_round(make_run_config):
+    """
+    output_type_id is not consistent across SMH rounds (round 4 shares each id across locations,
+    rounds 5+ scope ids to a single location), so smh_num_otid ids are sampled per round, and the
+    sampled ids are joined back on round too: an id sampled in one round must not pull in rows
+    that reuse the same id string in another round.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+    )
+    model_config.smh_num_otid = 2
+    model_config.smh_otid_seed = 42
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    # round 5 only has ids "a" and "b", so it always keeps both. If sampled ids were joined back
+    # without round, those would leak into round 4 on top of round 4's own sample of 2.
+    rows = [
+        {**row, "id": f"r{smh_round}_{row['id']}"} if row["id"] != "surveillance" else row
+        for smh_round, otids in [(4, ["a", "b", "c", "d"]), (5, ["a", "b"])]
+        for row in _smh_otid_rows(otids, smh_round=smh_round)
+    ]
+    df = pd.DataFrame(rows).drop_duplicates(subset="id")
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    def kept_otids_for(smh_round):
+        return {row_id.rsplit("_", 1)[-1] for row_id in filtered_df["id"] if row_id.startswith(f"r{smh_round}_")}
+
+    assert kept_otids_for(5) == {"a", "b"}
+    kept_4 = kept_otids_for(4)
+    assert len(kept_4) == 2
+    assert kept_4 <= {"a", "b", "c", "d"}
+
+
 @pytest.mark.parametrize("fips_codes, nci_ids", [
     (["US", "01", "25"], []),  # states only (US national counts as a state)
     ([], ["1", "25", "99"]),  # hsas only
