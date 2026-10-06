@@ -73,19 +73,34 @@ class GBQRModel(IDModel):
             sampled = rng.choice(available, size=model_config.smh_num_otid, replace=False)
             sampled_frames.append(pd.DataFrame({"round": r, "location": loc, "source": src, "otid": sampled}))
 
+        # when there are no SMH rows to sample from, return an empty frame that keeps df_smh's key
+        # dtypes: a bare pd.DataFrame(columns=...) has object-dtype columns, which pandas refuses to
+        # merge against the numeric `round` column in _filter_smh
         return pd.concat(sampled_frames, ignore_index=True) if sampled_frames else \
-            pd.DataFrame(columns=["round", "location", "source", "otid"])
+            df_smh[["round", "location", "source", "otid"]].iloc[0:0]
 
 
     def _filter_smh(self, df: pd.DataFrame, model_config: GBQRModelConfig, run_config: RunConfig) -> pd.DataFrame:
         # SMH source values are formatted "smh-{model_id}"; season values are formatted
         # "{season}{scenario_letter}-{output_type_id}" (see iddata.sources.smh.SMHDataSource.load).
         df_surveillance = df.loc[df["source"].str[:4] != "smh-"]
-        df_smh = df.loc[(df["source"].str[:4] == "smh-") & (df["wk_end_date"] < pd.Timestamp(run_config.ref_date))]
+        df_smh = df.loc[df["source"].str[:4] == "smh-"]
 
+        # SMH was explicitly requested as a source, so if no SMH rows survive filtering, raise rather
+        # than silently fitting a surveillance-only model whose output is still labeled as using SMH.
+        # Each filter is checked separately so the error names the one that removed the last rows.
         # only filter for model and otid if included in the config file
         if model_config.smh_model:
             df_smh = df_smh.loc[df_smh["source"].isin([f"smh-{m}" for m in model_config.smh_model])]
+        if df_smh.empty:
+            raise ValueError(f"No SMH rows found for smh_model={model_config.smh_model}.")
+
+        df_smh = df_smh.loc[df_smh["wk_end_date"] < pd.Timestamp(run_config.ref_date)]
+        if df_smh.empty:
+            raise ValueError(
+                f"No SMH rows for smh_model={model_config.smh_model} have wk_end_date before "
+                f"ref_date={run_config.ref_date}."
+            )
 
         resolved = self._resolve_smh_otid(df_smh, model_config)
         if isinstance(resolved, pd.DataFrame):
@@ -96,6 +111,11 @@ class GBQRModel(IDModel):
             # explicit global list (smh_otid set directly): persist as-is for provenance
             model_config.smh_otid = resolved
             df_smh = df_smh.loc[df_smh["season"].str[9:].isin(resolved)]
+            if df_smh.empty:
+                raise ValueError(
+                    f"No SMH rows for smh_model={model_config.smh_model} before ref_date={run_config.ref_date} "
+                    f"match smh_otid={resolved}."
+                )
 
         df_smh = df_smh.drop(columns=["round"])
         return pd.concat([df_surveillance, df_smh], join="inner", axis=0)

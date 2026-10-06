@@ -307,6 +307,33 @@ def test_gbqr_model_config_rejects_both_smh_otid_and_smh_num_otid():
         )
 
 
+@pytest.mark.parametrize("smh_model, smh_otid, smh_num_otid, ref_date, match", [
+    (["NoSuchModel"], [], 2, "2024-12-07", "No SMH rows found for smh_model"),
+    (["NoSuchModel"], [], None, "2024-12-07", "No SMH rows found for smh_model"),
+    (["NotreDame-FRED"], [], 2, "2024-11-30", "before ref_date"),
+    (["NotreDame-FRED"], [], None, "2024-11-30", "before ref_date"),
+    (["NotreDame-FRED"], ["zzz"], None, "2024-12-07", "match smh_otid"),
+])
+def test_gbqr_filter_smh_raises_if_no_smh_rows_left(make_run_config, smh_model, smh_otid, smh_num_otid,
+                                                    ref_date, match):
+    """
+    SMH was explicitly requested as a source, so if the smh_model, ref_date, or smh_otid filter
+    removes every SMH row, _filter_smh should raise (naming the filter responsible) rather than
+    silently returning surveillance-only data.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=smh_model,
+        smh_otid=smh_otid,
+    )
+    model_config.smh_num_otid = smh_num_otid
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat(ref_date), states=["US"], hsas=[])
+    df = pd.DataFrame(_smh_otid_rows(["a", "b", "c"]))
+
+    model = GBQRModel(model_config)
+    with pytest.raises(ValueError, match=match):
+        model._filter_smh(df, model_config, run_config)
+
+
 @pytest.mark.parametrize("fips_codes, nci_ids", [
     (["US", "01", "25"], []),  # states only (US national counts as a state)
     ([], ["1", "25", "99"]),  # hsas only
