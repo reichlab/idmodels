@@ -334,6 +334,45 @@ def test_gbqr_filter_smh_raises_if_no_smh_rows_left(make_run_config, smh_model, 
         model._filter_smh(df, model_config, run_config)
 
 
+def test_gbqr_feature_pipeline_does_not_bleed_across_smh_trajectories(make_run_config):
+    """
+    For flu/RSV, GBQR's time-series features are grouped by (source, location, season). SMH
+    trajectories share source and location and differ only in the season string (which encodes
+    scenario + output_type_id), so without season in the grouping, one trajectory's lags would be
+    computed from another trajectory's values.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    pipeline = GBQRModel(model_config)._build_feature_pipeline(run_config)
+
+    # every grouped time-series step should be scoped to season as well as source/location
+    grouped_steps = [f for f in pipeline.features if hasattr(f, "group_columns")]
+    assert grouped_steps
+    for step in grouped_steps:
+        assert step.group_columns == ["source", "location", "season"], type(step).__name__
+
+    # two trajectories for the same model/location, with clearly distinct values
+    dates = pd.date_range("2024-11-02", periods=4, freq="W-SAT")
+    df = pd.DataFrame([
+        {"source": "smh-NotreDame-FRED", "location": "syn-US", "season": f"2024/25A-{otid}",
+         "wk_end_date": date, "inc_trans_cs": base + i}
+        for otid, base in [("a", 100.0), ("b", 200.0)]
+        for i, date in enumerate(dates)
+    ])
+
+    lag_step = next(f for f in grouped_steps if type(f).__name__ == "LagFeature")
+    lagged_df, _ = lag_step.apply(df, [])
+
+    for otid, base in [("a", 100.0), ("b", 200.0)]:
+        traj = lagged_df.loc[lagged_df["season"] == f"2024/25A-{otid}"].sort_values("wk_end_date")
+        # the first week has no earlier value within its own trajectory
+        assert pd.isna(traj["inc_trans_cs_lag1"].iloc[0])
+        # later weeks lag only their own trajectory's values
+        assert traj["inc_trans_cs_lag1"].iloc[1:].tolist() == [base, base + 1, base + 2]
+
+
 @pytest.mark.parametrize("fips_codes, nci_ids", [
     (["US", "01", "25"], []),  # states only (US national counts as a state)
     ([], ["1", "25", "99"]),  # hsas only
