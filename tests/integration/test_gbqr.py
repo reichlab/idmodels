@@ -408,6 +408,44 @@ def test_gbqr_filter_smh_num_otid_samples_independently_per_round(make_run_confi
     assert kept_4 <= {"a", "b", "c", "d"}
 
 
+@pytest.mark.parametrize("supplementary_sources", [[], [SourceType.NSSP, SourceType.ILINET]])
+def test_gbqr_filter_sources_df_is_noop_without_smh(make_run_config, supplementary_sources):
+    """
+    _filter_sources_df only applies SMH filtering when SMH is a configured source. Otherwise it must
+    return the data unchanged -- including data with no SMH rows and no `round` column, which
+    _filter_smh would reject.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=supplementary_sources,
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    df = pd.DataFrame([
+        {"source": "nhsn", "location": "US", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-11-30")},
+        {"source": "nssp", "location": "US", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")},
+    ])
+
+    filtered_df = GBQRModel(model_config)._filter_sources_df(df.copy(), run_config)
+
+    assert_frame_equal(filtered_df, df)
+
+
+def test_gbqr_build_sources_passes_smh_config_to_smh_data_source(make_run_config):
+    """smh_model and smh_otid are passed through to SMHDataSource as model_id and output_type_id."""
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH],
+        smh_model=["NotreDame-FRED"], smh_otid=["010100010100"],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    with patch("idmodels.gbqr.SMHDataSource") as mock_smh:
+        sources = GBQRModel(model_config)._build_sources(run_config)
+
+    mock_smh.assert_called_once_with(disease=run_config.disease, model_id=["NotreDame-FRED"],
+                                     output_type_id=["010100010100"])
+    assert isinstance(sources[0], NHSNDataSource)
+    assert sources[1] is mock_smh.return_value
+
+
 @pytest.mark.parametrize("fips_codes, nci_ids", [
     (["US", "01", "25"], []),  # states only (US national counts as a state)
     ([], ["1", "25", "99"]),  # hsas only
