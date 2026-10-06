@@ -324,46 +324,59 @@ class DirectionalWaveFeature(Feature):
 
         # Sort dataframe by location and date for efficient processing
         df_sorted = df.sort_values(["location", "wk_end_date"]).reset_index(drop=True)
+
+        # Location x date lookup table for vectorized neighbor averaging. Duplicate
+        # (location, wk_end_date) rows (e.g. from horizon expansion happening earlier in
+        # the pipeline) share the same inc_trans_cs value, so dropping duplicates here
+        # doesn't change which value is looked up.
+        pivot = (
+            df_sorted.drop_duplicates(subset=["location", "wk_end_date"])
+            .pivot(index="wk_end_date", columns="location", values="inc_trans_cs")
+        )
+
+        def _weighted_avg_by_date(neighbors: list[tuple[str, float]]) -> pd.Series:
+            """Inverse-distance-weighted average of a location's neighbors, for every date at once."""
+            if not neighbors:
+                return pd.Series(np.nan, index=pivot.index)
+            locs = [nloc for nloc, _ in neighbors]
+            dists = np.array([dist for _, dist in neighbors], dtype=float)
+            weights = np.where(dists > 0, 1.0 / dists, 1.0)
+
+            sub = pivot.reindex(columns=locs).to_numpy()
+            valid = ~np.isnan(sub)
+            weighted_sum = np.nansum(sub * weights, axis=1)
+            weight_total = (valid * weights).sum(axis=1)
+
+            with np.errstate(invalid="ignore", divide="ignore"):
+                result = weighted_sum / weight_total
+            result[weight_total == 0] = np.nan
+            return pd.Series(result, index=pivot.index)
+
+        def _assign_feature(feat_name: str, per_loc_series: dict) -> None:
+            """Merge a {location: Series(date -> value)} map onto df_sorted as a new column."""
+            wide = pd.DataFrame(per_loc_series)
+            long = wide.stack(future_stack=True).rename(feat_name).reset_index()
+            long.columns = ["wk_end_date", "location", feat_name]
+            merged = df_sorted[["location", "wk_end_date"]].merge(
+                long, on=["location", "wk_end_date"], how="left"
+            )
+            df_sorted[feat_name] = merged[feat_name].to_numpy()
+
         wave_features: dict = {}
-
-
-        def _weighted_avg(neighbors, date):
-            ws, wt = 0.0, 0.0
-            for nloc, dist in neighbors:
-                val = df_sorted.loc[
-                    (df_sorted["location"] == nloc) & (df_sorted["wk_end_date"] == date),
-                    "inc_trans_cs",
-                ]
-                if len(val) > 0 and not pd.isna(val.iloc[0]):
-                    w = 1.0 / dist if dist > 0 else 1.0
-                    ws += w * val.iloc[0]
-                    wt += w
-            return ws / wt if wt > 0 else np.nan
-
 
         # Base directional features
         for direction in self.directions:
             feat_name = f"inc_trans_cs_wave_{direction}"
-            feat_values = []
-            for _, row in df_sorted.iterrows():
-                loc = row["location"]
-                date = row["wk_end_date"]
-                neighbors = neighbor_cache[loc][direction]
-                feat_values.append(_weighted_avg(neighbors, date))
-            wave_features[feat_name] = feat_values
+            per_loc_series = {loc: _weighted_avg_by_date(neighbor_cache[loc][direction]) for loc in locations_in_df}
+            _assign_feature(feat_name, per_loc_series)
+            wave_features[feat_name] = None
 
         # Aggregate feature
         if self.include_aggregate:
-            feat_values = []
-            for _, row in df_sorted.iterrows():
-                loc = row["location"]
-                date = row["wk_end_date"]
-                feat_values.append(_weighted_avg(all_neighbor_cache[loc], date))
-            wave_features["inc_trans_cs_wave_avg"] = feat_values
-
-        # Add base features to dataframe
-        for feat_name, vals in wave_features.items():
-            df_sorted[feat_name] = vals
+            feat_name = "inc_trans_cs_wave_avg"
+            per_loc_series = {loc: _weighted_avg_by_date(all_neighbor_cache[loc]) for loc in locations_in_df}
+            _assign_feature(feat_name, per_loc_series)
+            wave_features[feat_name] = None
 
         base_feat_names = list(wave_features.keys())
 
