@@ -36,6 +36,7 @@ class IDModel(ABC):
         """Load data, generate predictions, and save to file."""
         sources = self._build_sources(run_config)
         df = DiseaseDataLoader().load(sources=sources, as_of=run_config.ref_date, ancillary=[PopulationData()])
+        df = self._filter_sources_df(df, run_config)
         df = self._filter_locations(df, run_config)
         df["unique_id"] = df["agg_level"] + df["location"]
 
@@ -112,11 +113,22 @@ class IDModel(ABC):
         return ComposedTransform([SourceScaleTransform(source_scale_params), power_t, CenterScaleTransform()])
 
 
+    def _filter_sources_df(self, df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:
+        """Optional hook for subclasses to filter/adjust the combined, loaded sources DataFrame."""
+        return df
+
+
     def _filter_locations(self, df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:
         if not run_config.states and not run_config.hsas:
             raise ValueError("RunConfig must specify at least one state or HSA.")
 
-        df_states = df.loc[(df["location"].isin(run_config.states)) & (df["agg_level"] != "hsa")]
+        # Restrict to state/national rows before matching on the location suffix: some sources
+        # (e.g. ILINet's HHS region rows, "Region 1".."Region 10") have location strings whose last
+        # two characters can coincidentally match a requested state FIPS code (e.g. "Region 10" vs.
+        # Delaware's "10"), which would otherwise let non-state/national rows leak through.
+        df_states = df.loc[
+            (df["location"].str[-2:].isin(run_config.states)) & (df["agg_level"].isin(["state", "national"]))
+        ]
         df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
         return pd.concat([df_states, df_hsas], join="inner", axis=0)
 

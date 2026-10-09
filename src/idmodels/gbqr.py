@@ -8,7 +8,8 @@ from iddata.sources.flusurvnet import FluSurvNetDataSource
 from iddata.sources.ilinet import ILINetDataSource
 from iddata.sources.nhsn import NHSNDataSource
 from iddata.sources.nssp import NSSPDataSource
-from tqdm.autonotebook import tqdm
+from iddata.sources.smh import SMHDataSource
+from joblib import Parallel, delayed
 
 from idmodels.config import GBQRModelConfig, RunConfig, SourceType
 from idmodels.features import (
@@ -37,11 +38,97 @@ class GBQRModel(IDModel):
         self.model_config: GBQRModelConfig = model_config
 
 
+    def _resolve_smh_otid(self, df_smh: pd.DataFrame, model_config: GBQRModelConfig) -> list[str] | pd.DataFrame:
+        """
+        Resolve the SMH output_type_ids (trajectory sample ids) to filter to. If smh_otid was set
+        explicitly, use it as-is (applied globally, across every round/location alike). If
+        smh_num_otid was set instead, randomly sample that many ids independently within each
+        (round, location, source) group and return a ["round", "location", "source", "otid"]
+        DataFrame to join against: output_type_id is NOT a globally consistent identifier across
+        rounds -- round 4 shares each id across every location (a true trajectory sample), but
+        rounds 5+ scope each id to a single location (an arbitrary per-location index, disjoint
+        from other locations' ids). Sampling from the pooled, round/location-agnostic set of ids
+        would mostly select ids that only exist for one location each, starving every other
+        location of SMH rows. Grouping must also include `source` (the SMH model): otid values are
+        independently assigned per model and are not unique across models within a (round,
+        location) group, so pooling across models before sampling -- or joining the sampled ids
+        back on (round, location) alone -- would let one sampled id match unrelated rows from every
+        other model that happens to reuse that same id string.
+        """
+        if model_config.smh_otid or not model_config.smh_num_otid:
+            return model_config.smh_otid
+
+        df_smh = df_smh.assign(otid=df_smh["season"].str[9:])
+        rng = np.random.default_rng(model_config.smh_otid_seed)
+
+        sampled_frames = []
+        for (r, loc, src), group in df_smh.groupby(["round", "location", "source"]):
+            available = sorted(group["otid"].unique())
+            if model_config.smh_num_otid > len(available):
+                raise ValueError(
+                    f"smh_num_otid={model_config.smh_num_otid} exceeds the {len(available)} "
+                    f"output_type_ids available for round={r}, location={loc}, source={src}, "
+                    f"smh_model={model_config.smh_model}."
+                )
+            sampled = rng.choice(available, size=model_config.smh_num_otid, replace=False)
+            sampled_frames.append(pd.DataFrame({"round": r, "location": loc, "source": src, "otid": sampled}))
+
+        # when there are no SMH rows to sample from, return an empty frame that keeps df_smh's key
+        # dtypes: a bare pd.DataFrame(columns=...) has object-dtype columns, which pandas refuses to
+        # merge against the numeric `round` column in _filter_smh
+        return pd.concat(sampled_frames, ignore_index=True) if sampled_frames else \
+            df_smh[["round", "location", "source", "otid"]].iloc[0:0]
+
+
+    def _filter_smh(self, df: pd.DataFrame, model_config: GBQRModelConfig, run_config: RunConfig) -> pd.DataFrame:
+        # SMH source values are formatted "smh-{model_id}"; season values are formatted
+        # "{season}{scenario_letter}-{output_type_id}" (see iddata.sources.smh.SMHDataSource.load).
+        df_surveillance = df.loc[df["source"].str[:4] != "smh-"]
+        df_smh = df.loc[df["source"].str[:4] == "smh-"]
+
+        # SMH was explicitly requested as a source, so if no SMH rows survive filtering, raise rather
+        # than silently fitting a surveillance-only model whose output is still labeled as using SMH.
+        # Each filter is checked separately so the error names the one that removed the last rows.
+        # only filter for model and otid if included in the config file
+        if model_config.smh_model:
+            df_smh = df_smh.loc[df_smh["source"].isin([f"smh-{m}" for m in model_config.smh_model])]
+        if df_smh.empty:
+            raise ValueError(f"No SMH rows found for smh_model={model_config.smh_model}.")
+
+        df_smh = df_smh.loc[df_smh["wk_end_date"] < pd.Timestamp(run_config.ref_date)]
+        if df_smh.empty:
+            raise ValueError(
+                f"No SMH rows for smh_model={model_config.smh_model} have wk_end_date before "
+                f"ref_date={run_config.ref_date}."
+            )
+
+        resolved = self._resolve_smh_otid(df_smh, model_config)
+        if isinstance(resolved, pd.DataFrame):
+            df_smh = df_smh.assign(otid=df_smh["season"].str[9:]) \
+                            .merge(resolved, on=["round", "location", "source", "otid"], how="inner") \
+                            .drop(columns=["otid"])
+        elif resolved:
+            # explicit global list (smh_otid set directly): persist as-is for provenance
+            model_config.smh_otid = resolved
+            df_smh = df_smh.loc[df_smh["season"].str[9:].isin(resolved)]
+            if df_smh.empty:
+                raise ValueError(
+                    f"No SMH rows for smh_model={model_config.smh_model} before ref_date={run_config.ref_date} "
+                    f"match smh_otid={resolved}."
+                )
+
+        df_smh = df_smh.drop(columns=["round"])
+        return pd.concat([df_surveillance, df_smh], join="inner", axis=0)
+
+
     def _build_sources(self, run_config: RunConfig):
         source_map = {SourceType.NHSN: NHSNDataSource(disease=run_config.disease),
                       SourceType.NSSP: NSSPDataSource(disease=run_config.disease),
                       SourceType.ILINET: ILINetDataSource(scale_to_positive=self.model_config.reporting_adj),
-                      SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj)}
+                      SourceType.FLUSURVNET: FluSurvNetDataSource(burden_adj=self.model_config.reporting_adj),
+                      SourceType.SMH: SMHDataSource(disease=run_config.disease,
+                                                     model_id=self.model_config.smh_model,
+                                                     output_type_id=self.model_config.smh_otid)}
         # concatenate + dedupe sources while preserving order so main_source is always first
         all_sources = list(dict.fromkeys([self.model_config.main_source] + self.model_config.supplementary_sources))
 
@@ -52,11 +139,24 @@ class GBQRModel(IDModel):
         return [source_map[s] for s in all_sources]
 
 
+    def _filter_sources_df(self, df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:
+        all_sources = [self.model_config.main_source] + self.model_config.supplementary_sources
+        if SourceType.SMH in all_sources:
+            df = self._filter_smh(df, self.model_config, run_config)
+        return df
+
+
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:
         if run_config.disease in (Disease.FLU, Disease.RSV):
             initial_feats = ["inc_trans_cs", "season_week", "log_pop"]
+            # Season-scoped grouping: prevents lag/rolling/Taylor/horizon-target features from
+            # bleeding across season boundaries. This also disambiguates SMH's overlapping
+            # scenario/output_type_id realizations, which otherwise share (source, location) and
+            # only differ by season (SMH encodes scenario+otid into the season string).
+            group_cols = ["source", "location", "season"]
         else:
             initial_feats = ["inc_trans_cs", "log_pop"]
+            group_cols = ["source", "location"]
 
         features = []
 
@@ -75,12 +175,13 @@ class GBQRModel(IDModel):
         features += [
             OneHotEncodingFeature(columns=["source", "agg_level", "location"]),
             HolidayFeature(),
-            LagFeature(columns=["inc_trans_cs"], lags=[1, 2]),
-            TaylorFeature(column="inc_trans_cs", degree=2, window_sizes=[4, 6]),
-            TaylorFeature(column="inc_trans_cs", degree=1, window_sizes=[3, 5]),
-            RollingMeanFeature(column="inc_trans_cs", window_sizes=[2, 4]),
-            LagFeature(columns=None, lags=[1, 2]),
-            HorizonTargetFeature(column="inc_trans_cs", max_horizon=run_config.max_horizon),
+            LagFeature(columns=["inc_trans_cs"], lags=[1, 2], group_columns=group_cols),
+            TaylorFeature(column="inc_trans_cs", degree=2, window_sizes=[4, 6], group_columns=group_cols),
+            TaylorFeature(column="inc_trans_cs", degree=1, window_sizes=[3, 5], group_columns=group_cols),
+            RollingMeanFeature(column="inc_trans_cs", window_sizes=[2, 4], group_columns=group_cols),
+            LagFeature(columns=None, lags=[1, 2], group_columns=group_cols),
+            HorizonTargetFeature(column="inc_trans_cs", max_horizon=run_config.max_horizon,
+                                 group_columns=group_cols),
         ]
 
         if not self.model_config.incl_level_feats:
@@ -162,32 +263,49 @@ class GBQRModel(IDModel):
         # seeds for lgb model fits, one per combination of bag and quantile level
         lgb_seeds = rng.integers(1e8, size=(self.model_config.num_bags, len(run_config.q_levels)))
 
-        test_preds_by_bag = np.empty((x_test.shape[0], self.model_config.num_bags, len(run_config.q_levels)))
         train_seasons = df_train["season"].unique()
+
+        # indices of observations in each bag; drawn from `rng` sequentially by bag number so the
+        # random sequence (and thus the resulting bags) doesn't depend on how fits are parallelized below
+        bag_obs_inds_by_bag = [
+            df_train["season"].isin(rng.choice(train_seasons,
+                                               size=int(len(train_seasons) * self.model_config.bag_frac_samples),
+                                               replace=False))
+            for _ in range(self.model_config.num_bags)
+        ]
+
+        def _fit_bag_quantile(b, q_ind, q_level):
+            bag_obs_inds = bag_obs_inds_by_bag[b]
+            # n_jobs=1: fits run concurrently across bags/quantiles via the Parallel call below, so each
+            # individual lgb fit is kept single-threaded to avoid oversubscribing CPU cores
+            model = lgb.LGBMRegressor(verbosity=-1,
+                                      objective="quantile",
+                                      alpha=q_level,
+                                      random_state=lgb_seeds[b, q_ind],
+                                      n_jobs=1)
+            model.fit(X=x_train.loc[bag_obs_inds, :], y=y_train.loc[bag_obs_inds])
+            feat_importance_df = pd.DataFrame({"feat": x_train.columns,
+                                               "importance": model.feature_importances_,
+                                               "b": b,
+                                               "q_level": q_level})
+            return model.predict(X=x_test), feat_importance_df
+
+        # fits are independent across (bag, quantile level) pairs, so run them concurrently; "threads"
+        # avoids pickling/copying x_train/y_train per task, and lightgbm releases the GIL during fitting
+        results = Parallel(n_jobs=-1, prefer="threads", verbose=10)(
+            delayed(_fit_bag_quantile)(b, q_ind, q_level)
+            for b in range(self.model_config.num_bags)
+            for q_ind, q_level in enumerate(run_config.q_levels)
+        )
+
+        test_preds_by_bag = np.empty((x_test.shape[0], self.model_config.num_bags, len(run_config.q_levels)))
         feat_importance = []
-
-        # training loop over bags
-        for b in tqdm(range(self.model_config.num_bags), "Bag number"):
-            # get indices of observations that are in bag
-            bag_seasons = rng.choice(train_seasons,
-                                     size=int(len(train_seasons) * self.model_config.bag_frac_samples),
-                                     replace=False)
-            bag_obs_inds = df_train["season"].isin(bag_seasons)
-
-            for q_ind, q_level in enumerate(run_config.q_levels):
-                # fit to bag
-                model = lgb.LGBMRegressor(verbosity=-1,
-                                          objective="quantile",
-                                          alpha=q_level,
-                                          random_state=lgb_seeds[b, q_ind])
-                model.fit(X=x_train.loc[bag_obs_inds, :], y=y_train.loc[bag_obs_inds])
-
-                feat_importance.append(pd.DataFrame({"feat": x_train.columns,
-                                                     "importance": model.feature_importances_,
-                                                     "b": b,
-                                                     "q_level": q_level}))
-                # test set predictions
-                test_preds_by_bag[:, b, q_ind] = model.predict(X=x_test)
+        result_iter = iter(results)
+        for b in range(self.model_config.num_bags):
+            for q_ind in range(len(run_config.q_levels)):
+                preds, feat_importance_df = next(result_iter)
+                test_preds_by_bag[:, b, q_ind] = preds
+                feat_importance.append(feat_importance_df)
 
         # combine and save feature importance scores
         if self.model_config.save_feat_importance:

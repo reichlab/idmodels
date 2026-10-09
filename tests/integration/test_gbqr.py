@@ -35,6 +35,417 @@ def test_gbqr_nhsn(make_run_config):
     assert_frame_equal(actual_df, expected_df)
 
 
+def test_gbqr_nhsn_smh(make_run_config):
+    date = datetime.date.fromisoformat("2024-12-07")
+    fips_codes = ["US", "01", "06", "25", "48", "36", "56", "72"]
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"], smh_otid=["010100010100"], custom_name="nhsn_smh")
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
+
+    # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
+    with patch.object(lightgbm.sklearn.LGBMModel, "predict",
+                      return_value=_predictions_val()[0:33]):
+        model = GBQRModel(model_config)
+        model.run(run_config)
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
+    expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
+                              f"UMass-{model_config.model_name}" /
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
+    assert_frame_equal(actual_df, expected_df)
+
+
+
+# tests that synthetic locations aren't dropped
+def test_filter_locations(make_run_config):
+    """
+    Unit test for GBQRModel._filter_locations: particularly that the SMH rows are filtered correctly
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.NSSP, SourceType.SMH],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=["9"])
+
+    rows = [
+        # kept: matches selected surveillance location (state)
+        {"id": "surveillance", "agg_level": "national", "location": "US", "source": "nhsn", "season": "2024/25"},
+        # kept: matches selected surveillance location (hsa)
+        {"id": "surveillance", "agg_level": "hsa", "location": "9", "source": "nssp", "season": "2024/25"},
+        # kept: matches selected location
+        {"id": "smh_match", "agg_level": "national", "location": "syn-US", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100"},
+        # dropped: wrong location
+        {"id": "smh_wrong_location", "agg_level": "state", "location": "syn-01", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100"}
+    ]
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_locations(df, run_config)
+
+    assert set(filtered_df["id"]) == {"surveillance", "surveillance", "smh_match"}
+
+
+def test_filter_locations_excludes_non_state_agg_levels_matching_fips_suffix(make_run_config):
+    """
+    Regression test for GBQRModel._filter_locations: a non-state/national row whose location
+    string happens to end in a requested state's FIPS code (e.g. ILINet's HHS region row
+    "Region 10", which collides with Delaware's "10") must not be swept in alongside real
+    state-level rows.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.ILINET],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["10"], hsas=[])
+
+    rows = [
+        # kept: genuine state-level row for the requested FIPS code
+        {"id": "state_match", "agg_level": "state", "location": "10", "source": "nhsn", "season": "2024/25"},
+        # dropped: HHS region row whose location suffix collides with the requested state code
+        {"id": "region_collision", "agg_level": "hhs region", "location": "Region 10", "source": "ilinet", "season": "2024/25"},
+    ]
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_locations(df, run_config)
+
+    assert set(filtered_df["id"]) == {"state_match"}
+
+
+@pytest.mark.parametrize("model_id, otid, row_ids", [
+    ([], [], {"surveillance", "smh_match", "smh_wrong_model", "smh_wrong_otid"}), # all SMH models and otids
+    (["NotreDame-FRED"], [], {"surveillance", "smh_match", "smh_wrong_otid"}), # Restrict to single SMH model
+    ([], ["010100010100"], {"surveillance", "smh_match", "smh_wrong_model"}), # Restrict to a single SMH otid
+    (["NotreDame-FRED"], ["010100010100"], {"surveillance", "smh_match"}) # Restrict to a single SMH model-otid combo
+])
+def test_gbqr_filter_smh(make_run_config, model_id, otid, row_ids):
+    """
+    Unit test for GBQRModel._filter_smh: non-SMH rows always pass through, and SMH rows are
+    kept only when they match the configured smh_model and smh_otid, and have wk_end_date
+    strictly before run_config.ref_date.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.SMH],
+        smh_model=model_id,
+        smh_otid=otid,
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    rows = [
+        # kept: non-SMH surveillance source, unaffected by any SMH filter
+        {"id": "surveillance", "source": "nhsn", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")},
+        # kept: matches configured model + output_type_id, strictly before ref_date
+        {"id": "smh_match", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100",
+         "wk_end_date": pd.Timestamp("2024-11-30"), "round": 5, "location": "syn-US"},
+        # dropped: wrong model_id
+        {"id": "smh_wrong_model", "source": "smh-OtherModel", "season": "2024/25A-010100010100",
+         "wk_end_date": pd.Timestamp("2024-11-30"), "round": 5, "location": "syn-US"},
+        # dropped: wrong output_type_id
+        {"id": "smh_wrong_otid", "source": "smh-NotreDame-FRED", "season": "2024/25A-999999999999",
+         "wk_end_date": pd.Timestamp("2024-11-30"), "round": 5, "location": "syn-US"},
+        # dropped: wk_end_date not strictly before ref_date
+        {"id": "smh_not_before_ref_date", "source": "smh-NotreDame-FRED", "season": "2024/25A-010100010100",
+         "wk_end_date": pd.Timestamp("2024-12-07"), "round": 5, "location": "syn-US"},
+    ]
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    assert set(filtered_df["id"]) == row_ids
+
+
+def _smh_otid_rows(otids, model_id="NotreDame-FRED", smh_round=5, locations=("syn-US",)):
+    """
+    Synthetic SMH rows spanning `locations` (default: a single location), each seeing the full
+    set of `otids`. output_type_id is scoped per (round, location) in real SMH data (see
+    iddata.sources.smh), so otid sampling/filtering is done within those groups.
+    """
+    rows = [
+        {"id": f"smh_{loc}_{otid}", "source": f"smh-{model_id}", "season": f"2024/25A-{otid}",
+         "wk_end_date": pd.Timestamp("2024-11-30"), "round": smh_round, "location": loc}
+        for loc in locations
+        for otid in otids
+    ]
+    return rows + [{"id": "surveillance", "source": "nhsn", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")}]
+
+
+def test_gbqr_filter_smh_num_otid_samples_available_ids(make_run_config):
+    """
+    Unit test for GBQRModel._filter_smh: when smh_num_otid is set (instead of an explicit
+    smh_otid list), the requested number of ids is randomly sampled independently within each
+    (round, location) group, from the ids actually present in that group's (already
+    model-filtered) SMH rows.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN,
+        supplementary_sources=[SourceType.SMH],
+        smh_model=["NotreDame-FRED"],
+    )
+    model_config.smh_num_otid = 2
+    model_config.smh_otid_seed = 42
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    df = pd.DataFrame(_smh_otid_rows(["a", "b", "c", "d"]))
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    kept_otids = {row_id.rsplit("_", 1)[-1] for row_id in filtered_df["id"] if row_id.startswith("smh_")}
+    assert len(kept_otids) == 2
+    assert kept_otids <= {"a", "b", "c", "d"}
+    assert "surveillance" in set(filtered_df["id"])
+    # a single-location group's sampled ids should never spill over onto smh_otid
+    # (that field is reserved for the explicit-list path)
+    assert model_config.smh_otid == []
+
+
+def test_gbqr_filter_smh_num_otid_samples_independently_per_location(make_run_config):
+    """Each (round, location) group draws its own independent sample of smh_num_otid ids."""
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+    )
+    model_config.smh_num_otid = 2
+    model_config.smh_otid_seed = 42
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    df = pd.DataFrame(_smh_otid_rows(["a", "b", "c", "d"], locations=("syn-US", "syn-01")))
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    for loc in ("syn-US", "syn-01"):
+        kept = {row_id.rsplit("_", 1)[-1] for row_id in filtered_df["id"]
+                if row_id.startswith(f"smh_{loc}_")}
+        assert len(kept) == 2
+        assert kept <= {"a", "b", "c", "d"}
+
+
+def test_gbqr_filter_smh_num_otid_samples_independently_per_model(make_run_config):
+    """
+    Regression test: output_type_id is assigned independently per SMH model and is NOT a globally
+    unique identifier within a (round, location) group -- two different models can reuse the same
+    otid string. When no smh_model filter narrows the source down to one model (smh_model=[], the
+    "all models" case), sampling must draw smh_num_otid ids *per model*, not from a single pool
+    shared across models: pooling before sampling (and then joining back on (round, location, otid)
+    alone) would let a sampled id incidentally match rows from every model that happens to reuse
+    that id string, and could just as easily fail to match a given model's rows at all, starving
+    that model even though smh_num_otid ids were "sampled".
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=[],
+    )
+    model_config.smh_num_otid = 2
+    model_config.smh_otid_seed = 42
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    # model_a has 4 ids to sample from; model_b reuses 2 of the SAME id strings and has no others.
+    # A pooled (round, location)-only sample of 2 ids could easily miss both of model_b's ids
+    # entirely (e.g. sampling "c"/"d"), which would incorrectly starve model_b of any SMH rows.
+    rows = (
+        _smh_otid_rows(["a", "b", "c", "d"], model_id="model_a")
+        + _smh_otid_rows(["a", "b"], model_id="model_b")
+    )
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    def kept_otids_for(model_id):
+        model_rows = filtered_df[filtered_df["source"] == f"smh-{model_id}"]
+        return {row_id.rsplit("_", 1)[-1] for row_id in model_rows["id"]}
+
+    kept_a = kept_otids_for("model_a")
+    kept_b = kept_otids_for("model_b")
+
+    # model_b only has 2 ids available, so with smh_num_otid=2 it must always retain exactly both
+    assert kept_b == {"a", "b"}
+    # model_a independently samples 2 of its own 4 ids, regardless of what was drawn for model_b
+    assert len(kept_a) == 2
+    assert kept_a <= {"a", "b", "c", "d"}
+
+
+def test_gbqr_filter_smh_num_otid_is_reproducible_with_seed(make_run_config):
+    """Same smh_otid_seed produces the same sampled ids across separate calls."""
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    df = pd.DataFrame(_smh_otid_rows(["a", "b", "c", "d", "e"]))
+
+    def sample():
+        model_config = create_test_gbqr_model_config(
+            main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+        )
+        model_config.smh_num_otid = 3
+        model_config.smh_otid_seed = 7
+        filtered_df = GBQRModel(model_config)._filter_smh(df.copy(), model_config, run_config)
+        return set(filtered_df["id"])
+
+    assert sample() == sample()
+
+
+def test_gbqr_filter_smh_num_otid_raises_if_more_than_available(make_run_config):
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+    )
+    model_config.smh_num_otid = 5
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    df = pd.DataFrame(_smh_otid_rows(["a", "b"]))
+
+    model = GBQRModel(model_config)
+    with pytest.raises(ValueError, match="exceeds"):
+        model._filter_smh(df, model_config, run_config)
+
+
+def test_gbqr_model_config_rejects_both_smh_otid_and_smh_num_otid():
+    with pytest.raises(ValueError, match="at most one"):
+        GBQRModelConfig(
+            model_name="gbqr_bad_config",
+            main_source=SourceType.NHSN,
+            fit_locations_separately=False,
+            power_transform=PowerTransform.FOURTH_ROOT,
+            smh_otid=["010100010100"],
+            smh_num_otid=2,
+        )
+
+
+@pytest.mark.parametrize("smh_model, smh_otid, smh_num_otid, ref_date, match", [
+    (["NoSuchModel"], [], 2, "2024-12-07", "No SMH rows found for smh_model"),
+    (["NoSuchModel"], [], None, "2024-12-07", "No SMH rows found for smh_model"),
+    (["NotreDame-FRED"], [], 2, "2024-11-30", "before ref_date"),
+    (["NotreDame-FRED"], [], None, "2024-11-30", "before ref_date"),
+    (["NotreDame-FRED"], ["zzz"], None, "2024-12-07", "match smh_otid"),
+])
+def test_gbqr_filter_smh_raises_if_no_smh_rows_left(make_run_config, smh_model, smh_otid, smh_num_otid,
+                                                    ref_date, match):
+    """
+    SMH was explicitly requested as a source, so if the smh_model, ref_date, or smh_otid filter
+    removes every SMH row, _filter_smh should raise (naming the filter responsible) rather than
+    silently returning surveillance-only data.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=smh_model,
+        smh_otid=smh_otid,
+    )
+    model_config.smh_num_otid = smh_num_otid
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat(ref_date), states=["US"], hsas=[])
+    df = pd.DataFrame(_smh_otid_rows(["a", "b", "c"]))
+
+    model = GBQRModel(model_config)
+    with pytest.raises(ValueError, match=match):
+        model._filter_smh(df, model_config, run_config)
+
+
+def test_gbqr_feature_pipeline_does_not_bleed_across_smh_trajectories(make_run_config):
+    """
+    For flu/RSV, GBQR's time-series features are grouped by (source, location, season). SMH
+    trajectories share source and location and differ only in the season string (which encodes
+    scenario + output_type_id), so without season in the grouping, one trajectory's lags would be
+    computed from another trajectory's values.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    pipeline = GBQRModel(model_config)._build_feature_pipeline(run_config)
+
+    # every grouped time-series step should be scoped to season as well as source/location
+    grouped_steps = [f for f in pipeline.features if hasattr(f, "group_columns")]
+    assert grouped_steps
+    for step in grouped_steps:
+        assert step.group_columns == ["source", "location", "season"], type(step).__name__
+
+    # two trajectories for the same model/location, with clearly distinct values
+    dates = pd.date_range("2024-11-02", periods=4, freq="W-SAT")
+    df = pd.DataFrame([
+        {"source": "smh-NotreDame-FRED", "location": "syn-US", "season": f"2024/25A-{otid}",
+         "wk_end_date": date, "inc_trans_cs": base + i}
+        for otid, base in [("a", 100.0), ("b", 200.0)]
+        for i, date in enumerate(dates)
+    ])
+
+    lag_step = next(f for f in grouped_steps if type(f).__name__ == "LagFeature")
+    lagged_df, _ = lag_step.apply(df, [])
+
+    for otid, base in [("a", 100.0), ("b", 200.0)]:
+        traj = lagged_df.loc[lagged_df["season"] == f"2024/25A-{otid}"].sort_values("wk_end_date")
+        # the first week has no earlier value within its own trajectory
+        assert pd.isna(traj["inc_trans_cs_lag1"].iloc[0])
+        # later weeks lag only their own trajectory's values
+        assert traj["inc_trans_cs_lag1"].iloc[1:].tolist() == [base, base + 1, base + 2]
+
+
+def test_gbqr_filter_smh_num_otid_samples_independently_per_round(make_run_config):
+    """
+    output_type_id is not consistent across SMH rounds (round 4 shares each id across locations,
+    rounds 5+ scope ids to a single location), so smh_num_otid ids are sampled per round, and the
+    sampled ids are joined back on round too: an id sampled in one round must not pull in rows
+    that reuse the same id string in another round.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+    )
+    model_config.smh_num_otid = 2
+    model_config.smh_otid_seed = 42
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    # round 5 only has ids "a" and "b", so it always keeps both. If sampled ids were joined back
+    # without round, those would leak into round 4 on top of round 4's own sample of 2.
+    rows = [
+        {**row, "id": f"r{smh_round}_{row['id']}"} if row["id"] != "surveillance" else row
+        for smh_round, otids in [(4, ["a", "b", "c", "d"]), (5, ["a", "b"])]
+        for row in _smh_otid_rows(otids, smh_round=smh_round)
+    ]
+    df = pd.DataFrame(rows).drop_duplicates(subset="id")
+
+    model = GBQRModel(model_config)
+    filtered_df = model._filter_smh(df, model_config, run_config)
+
+    def kept_otids_for(smh_round):
+        return {row_id.rsplit("_", 1)[-1] for row_id in filtered_df["id"] if row_id.startswith(f"r{smh_round}_")}
+
+    assert kept_otids_for(5) == {"a", "b"}
+    kept_4 = kept_otids_for(4)
+    assert len(kept_4) == 2
+    assert kept_4 <= {"a", "b", "c", "d"}
+
+
+@pytest.mark.parametrize("supplementary_sources", [[], [SourceType.NSSP, SourceType.ILINET]])
+def test_gbqr_filter_sources_df_is_noop_without_smh(make_run_config, supplementary_sources):
+    """
+    _filter_sources_df only applies SMH filtering when SMH is a configured source. Otherwise it must
+    return the data unchanged -- including data with no SMH rows and no `round` column, which
+    _filter_smh would reject.
+    """
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=supplementary_sources,
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    df = pd.DataFrame([
+        {"source": "nhsn", "location": "US", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-11-30")},
+        {"source": "nssp", "location": "US", "season": "2024/25", "wk_end_date": pd.Timestamp("2024-12-14")},
+    ])
+
+    filtered_df = GBQRModel(model_config)._filter_sources_df(df.copy(), run_config)
+
+    assert_frame_equal(filtered_df, df)
+
+
+def test_gbqr_build_sources_passes_smh_config_to_smh_data_source(make_run_config):
+    """smh_model and smh_otid are passed through to SMHDataSource as model_id and output_type_id."""
+    model_config = create_test_gbqr_model_config(
+        main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH],
+        smh_model=["NotreDame-FRED"], smh_otid=["010100010100"],
+    )
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+
+    with patch("idmodels.gbqr.SMHDataSource") as mock_smh:
+        sources = GBQRModel(model_config)._build_sources(run_config)
+
+    mock_smh.assert_called_once_with(disease=run_config.disease, model_id=["NotreDame-FRED"],
+                                     output_type_id=["010100010100"])
+    assert isinstance(sources[0], NHSNDataSource)
+    assert sources[1] is mock_smh.return_value
+
+
 @pytest.mark.parametrize("fips_codes, nci_ids", [
     (["US", "01", "25"], []),  # states only (US national counts as a state)
     ([], ["1", "25", "99"]),  # hsas only
@@ -135,9 +546,10 @@ def test_gbqr_test_set_predictions_filter_to_main_source(make_run_config):
     assert not preds_df.duplicated(subset=key_cols).any()
 
 
-def create_test_gbqr_model_config(main_source, supplementary_sources=[]):
+def create_test_gbqr_model_config(main_source, supplementary_sources=[], smh_model=[], smh_otid=[], custom_name=None):
+    name = custom_name if custom_name is not None else main_source.value
     model_config = GBQRModelConfig(
-        model_name="gbqr_" + main_source.value + "_no_reporting_adj",
+        model_name="gbqr_" + name + "_no_reporting_adj",
 
         incl_level_feats=True,
 
@@ -157,6 +569,10 @@ def create_test_gbqr_model_config(main_source, supplementary_sources=[]):
 
         # power transform applied to surveillance signals
         power_transform=PowerTransform.FOURTH_ROOT,
+
+        # smh trajectory filters
+        smh_model = smh_model,
+        smh_otid = smh_otid
     )
     return model_config
 
