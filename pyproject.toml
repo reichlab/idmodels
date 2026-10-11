@@ -11,7 +11,7 @@ classifiers = [
 dynamic = ["version"]
 
 dependencies = [
-    "iddata @ git+https://github.com/reichlab/iddata@6f5553008b4cabdaeb231ccf632c35e6d0ebab4b",
+    "iddata @ git+https://github.com/reichlab/iddata@a0f7ec472b4b82c7066184b43bda90ee0182f369",
     "joblib",
     "lightgbm",
     "numpy",

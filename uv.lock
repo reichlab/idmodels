@@ -563,7 +563,7 @@ wheels = [
 [[package]]
 name = "iddata"
 version = "2.1.0"
-source = { git = "https://github.com/reichlab/iddata?rev=6f5553008b4cabdaeb231ccf632c35e6d0ebab4b#6f5553008b4cabdaeb231ccf632c35e6d0ebab4b" }
+source = { git = "https://github.com/reichlab/iddata?rev=a0f7ec472b4b82c7066184b43bda90ee0182f369#a0f7ec472b4b82c7066184b43bda90ee0182f369" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
@@ -610,7 +610,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "coverage", marker = "extra == 'dev'" },
-    { name = "iddata", git = "https://github.com/reichlab/iddata?rev=6f5553008b4cabdaeb231ccf632c35e6d0ebab4b" },
+    { name = "iddata", git = "https://github.com/reichlab/iddata?rev=a0f7ec472b4b82c7066184b43bda90ee0182f369" },
     { name = "joblib" },
     { name = "lightgbm" },
     { name = "numpy" },
