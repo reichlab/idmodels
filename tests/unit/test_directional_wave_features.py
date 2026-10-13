@@ -1,10 +1,13 @@
 """Unit tests for directional wave feature generation."""
 
+import time
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from idmodels.features import DirectionalWaveFeature
+from idmodels.spatial_utils import get_location_centroids
 
 
 def create_test_dataframe():
@@ -310,3 +313,41 @@ def test_create_directional_wave_features_no_neighbors():
     assert "inc_trans_cs_wave_N" in feat_names
     # Feature should exist but be NaN (no neighbors)
     assert pd.isna(df_result.loc[0, "inc_trans_cs_wave_N"])
+
+
+def test_create_directional_wave_features_realistic_scale_is_fast():
+    """Regression test: computing wave features over a realistic amount of training
+    history (all states, ~2 seasons of weekly data) must stay fast. The original
+    implementation scanned the full dataframe with a boolean mask for every
+    (row, neighbor, direction) combination, which took tens of minutes at this scale;
+    the vectorized implementation should take well under a second.
+    """
+    locations = list(get_location_centroids(agg_level="state").keys())
+    dates = pd.date_range("2023-10-01", periods=100, freq="W")
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame([
+        {
+            "location": loc,
+            "wk_end_date": date,
+            "inc_trans_cs": rng.normal(),
+            "agg_level": "state",
+            "source": "nhsn",
+        }
+        for loc in locations
+        for date in dates
+    ])
+
+    start = time.perf_counter()
+    df_result, feat_names = DirectionalWaveFeature(
+        directions=["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+        temporal_lags=[1, 2],
+        max_distance_km=1500,
+        include_velocity=True,
+        include_aggregate=True,
+    ).apply(df, [])
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 5.0, f"directional wave feature computation took {elapsed:.1f}s at realistic scale"
+    for feat in feat_names:
+        assert feat in df_result.columns
