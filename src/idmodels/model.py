@@ -182,13 +182,20 @@ class IDModel(ABC):
 
 
     def _raise_if_incomplete(self, preds_df: pd.DataFrame, run_config: RunConfig, save_path) -> None:
-        """Raise if any predicted value is NaN, refusing to silently write an incomplete submission.
+        """Raise if there are no predictions or any predicted value is NaN, refusing to silently write
+        an incomplete submission.
 
         Missing upstream data (e.g. population for the latest week) can propagate as NaN all the
         way through a model without raising -- LightGBM and SARIX both happily predict from NaN
         features -- so this is the last point at which a bad run can still fail loudly instead of
-        writing a CSV that looks complete but has an all-NaN or partially-NaN value column.
+        writing a CSV that looks complete but has an all-NaN or partially-NaN value column, or no
+        rows at all.
         """
+        if preds_df.empty:
+            raise ValueError(
+                f"No predictions for {self.model_config} at ref_date={run_config.ref_date}; "
+                f"refusing to write {save_path}"
+            )
         if preds_df["value"].isna().any():
             n_na = preds_df["value"].isna().sum()
             raise ValueError(

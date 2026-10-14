@@ -41,9 +41,12 @@ def test_gbqr_nhsn_smh(make_run_config):
     model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"], smh_otid=["010100010100"], custom_name="nhsn_smh")
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
-    # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs
+    # patch lgb.LGBMRegressor's `predict()` to return the same values to make the tests reproducible across OSs.
+    # The test set is 3 horizon blocks of 8 NHSN rows; these are the positions the NHSN rows held when 3 SMH
+    # rows per horizon block were also (needlessly) predicted, which keeps the expected output unchanged
+    nhsn_positions = [*range(0, 8), *range(11, 19), *range(22, 30)]
     with patch.object(lightgbm.sklearn.LGBMModel, "predict",
-                      return_value=_predictions_val()[0:33]):
+                      return_value=_predictions_val()[nhsn_positions]):
         model = GBQRModel(model_config)
         model.run(run_config)
     actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
@@ -538,12 +541,58 @@ def test_gbqr_test_set_predictions_filter_to_main_source(make_run_config):
     df = pd.DataFrame(rows)
 
     model = GBQRModel(model_config)
-    with patch.object(lightgbm.sklearn.LGBMModel, "predict", return_value=numpy.array([0.1, 0.1])):
+    with patch.object(lightgbm.sklearn.LGBMModel, "predict", side_effect=lambda X: numpy.full(len(X), 0.1)):
         preds_df = model._fit_and_predict(df, feat_names=["feat1"], run_config=run_config)
 
     assert set(preds_df["source"].unique()) == {"nssp"}
     key_cols = ["location", "wk_end_date", "horizon", "output_type_id"]
     assert not preds_df.duplicated(subset=key_cols).any()
+
+
+def test_gbqr_test_set_uses_main_source_latest_week_when_supplementary_source_is_ahead(make_run_config):
+    """
+    Regression test: the test set used to be the rows at the latest wk_end_date across *all*
+    sources. SMH always has rows up to the Saturday before ref_date, so whenever the main source
+    lagged it (e.g. NHSN a week late), the test set held only SMH rows, which were then dropped by
+    the main-source filter, and an empty submission was written without error. The test set must
+    instead be the main source's latest week.
+    """
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH])
+    model_config.num_bags = 2
+    model_config.bag_frac_samples = 1.0
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-13"), states=["01"], hsas=[])
+
+    nhsn_dates = pd.to_datetime(["2023-12-16", "2023-12-23", "2023-12-30", "2024-01-06"])
+    smh_dates = nhsn_dates.append(pd.DatetimeIndex(["2024-01-13"]))
+    rows = []
+    for source, location, season, dates in [("nhsn", "01", "2023/24", nhsn_dates),
+                                            ("smh-NotreDame-FRED", "syn-01", "2023/24A-1", smh_dates)]:
+        for i, wk_end_date in enumerate(dates):
+            rows.append({
+                "source": source,
+                "agg_level": "state",
+                "location": location,
+                "unique_id": "state" + location,
+                "wk_end_date": wk_end_date,
+                "pop": 1_000_000,
+                "inc_trans_cs": 0.1 * (i + 1),
+                "horizon": 1,
+                "inc_trans_center_factor": 0.0,
+                "inc_trans_scale_factor": 1.0,
+                "season": season,
+                "season_week": 10,
+                "delta_target": None if wk_end_date == dates.max() else 0.05 * (i + 1),
+                "feat1": float(i),
+            })
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    with patch.object(lightgbm.sklearn.LGBMModel, "predict", side_effect=lambda X: numpy.full(len(X), 0.1)):
+        preds_df = model._fit_and_predict(df, feat_names=["feat1"], run_config=run_config)
+
+    assert not preds_df.empty
+    assert set(preds_df["source"].unique()) == {"nhsn"}
+    assert set(preds_df["wk_end_date"].unique()) == {pd.Timestamp("2024-01-06")}
 
 
 def create_test_gbqr_model_config(main_source, supplementary_sources=[], smh_model=[], smh_otid=[], custom_name=None):

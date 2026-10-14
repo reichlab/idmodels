@@ -196,8 +196,11 @@ class GBQRModel(IDModel):
         if run_config.disease in (Disease.FLU, Disease.RSV):
             df = df.query("season_week >= 5 and season_week <= 45")
 
-        # "test set" df used to generate look-ahead predictions
-        df_test = df.loc[df.wk_end_date == df.wk_end_date.max()].copy()
+        # "test set" df used to generate look-ahead predictions: the main source's latest week. Taking
+        # the max date across all sources would select only supplementary-source rows whenever the
+        # main source lags another source (e.g. SMH always runs up to ref_date), leaving nothing to predict
+        df_main = df.loc[df["source"] == self.model_config.main_source.value]
+        df_test = df_main.loc[df_main.wk_end_date == df_main.wk_end_date.max()].copy()
         # "train set" df for model fitting; target value non-missing
         df_train = df.loc[~df["delta_target"].isna().values]
 

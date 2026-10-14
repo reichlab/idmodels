@@ -46,6 +46,18 @@ def test_raise_if_incomplete_raises_when_all_nan():
         model._raise_if_incomplete(preds_df, run_config, save_path="out.csv")
 
 
+def test_raise_if_incomplete_raises_when_empty():
+    """An empty prediction set (e.g. the main source lags every supplementary source, so nothing
+    is left to predict) must not be written as a header-only submission CSV.
+    """
+    model = _FakeModel(model_config=Mock())
+    run_config = Mock(ref_date="2026-08-15")
+    preds_df = pd.DataFrame({"value": pd.Series([], dtype=float)})
+
+    with pytest.raises(ValueError, match=r"No predictions"):
+        model._raise_if_incomplete(preds_df, run_config, save_path="out.csv")
+
+
 def test_raise_if_incomplete_passes_when_no_nan():
     model = _FakeModel(model_config=Mock())
     run_config = Mock(ref_date="2026-08-15")
