@@ -108,8 +108,7 @@ class GBQRModel(IDModel):
                             .merge(resolved, on=["round", "location", "source", "otid"], how="inner") \
                             .drop(columns=["otid"])
         elif resolved:
-            # explicit global list (smh_otid set directly): persist as-is for provenance
-            model_config.smh_otid = resolved
+            # explicit global list (smh_otid set directly)
             df_smh = df_smh.loc[df_smh["season"].str[9:].isin(resolved)]
             if df_smh.empty:
                 raise ValueError(
