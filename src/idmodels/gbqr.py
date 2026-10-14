@@ -307,7 +307,7 @@ class GBQRModel(IDModel):
 
         # fits are independent across (bag, quantile level) pairs, so run them concurrently; "threads"
         # avoids pickling/copying x_train/y_train per task, and lightgbm releases the GIL during fitting
-        results = Parallel(n_jobs=-1, prefer="threads", verbose=10)(
+        results = Parallel(n_jobs=-1, prefer="threads", verbose=1)(
             delayed(_fit_bag_quantile)(b, q_ind, q_level)
             for b in range(self.model_config.num_bags)
             for q_ind, q_level in enumerate(run_config.q_levels)
