@@ -170,9 +170,7 @@ timeseriesutils @ git+https://github.com/reichlab/timeseriesutils@d25f33db30a8d5
 toml==0.10.2
     # via iddata
 tqdm==4.67.0
-    # via
-    #   idmodels (pyproject.toml)
-    #   numpyro
+    # via numpyro
 tzdata==2024.2
     # via pandas
 urllib3==2.2.3
