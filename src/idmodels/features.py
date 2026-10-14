@@ -129,7 +129,7 @@ class RollingMeanFeature(Feature):
     ):
         self.column = column
         self.window_sizes = window_sizes
-        self.group_columns = group_columns if group_columns is not None else ["location"]
+        self.group_columns = group_columns if group_columns is not None else ["source", "location"]
 
 
     def apply(self, df: pd.DataFrame, feat_names: list[str]) -> tuple[pd.DataFrame, list[str]]:
