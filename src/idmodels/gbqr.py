@@ -149,10 +149,22 @@ class GBQRModel(IDModel):
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:
         if run_config.disease in (Disease.FLU, Disease.RSV):
             initial_feats = ["inc_trans_cs", "season_week", "log_pop"]
-            # Season-scoped grouping: prevents lag/rolling/Taylor/horizon-target features from
-            # bleeding across season boundaries. This also disambiguates SMH's overlapping
-            # scenario/output_type_id realizations, which otherwise share (source, location) and
-            # only differ by season (SMH encodes scenario+otid into the season string).
+            # Season-scoped grouping, for every flu/RSV run (not just SMH ones). timeseriesutils' lag,
+            # rolling, Taylor, and horizon-target features are row-based shifts, not date-based, so
+            # within (source, location) they silently bridge any gap in a source's rows:
+            # - FluSurvNet only reports season weeks ~10-40, so with (source, location) grouping its
+            #   early-season rows took lags/windows from the previous April, and its late-season rows
+            #   got horizon targets from the following October -- all inside the season_week 5-45
+            #   training window in _fit_and_predict. A few early ILINet national seasons have the
+            #   same kind of summer gap.
+            # - SMH trajectories share (source, location) and differ only in the season string (which
+            #   encodes scenario + output_type_id), so without season they would be treated as one
+            #   interleaved series.
+            # For sources reported year-round (NHSN, most ILINet), the cost is small: the longest
+            # lookback is 7 weeks (6-week Taylor window lagged by 2), so only training rows at season
+            # weeks 5-7 lose inputs from the previous season's late-July weeks. Horizon targets for
+            # in-season rows (week <= 45) don't reach past season week 52 for max_horizon <= 7, and
+            # forecast dates are well past week 7.
             group_cols = ["source", "location", "season"]
         else:
             initial_feats = ["inc_trans_cs", "log_pop"]
