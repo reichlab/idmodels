@@ -82,9 +82,14 @@ class GBQRModelConfig(ModelConfig):
     
     # smh trajectory filters
     smh_model: list[str] = field(default_factory=list)
+    # explicit output_type_ids (trajectory sample ids), applied as-is across every round and location.
+    # Note that ids only mean "the same trajectory everywhere" in round 4: rounds 5+ scope each id to a
+    # single location, so an explicit list there typically keeps SMH rows for just one location. To get
+    # trajectories for every location, use smh_num_otid instead.
     smh_otid: list[str] = field(default_factory=list)
     # alternative to smh_otid: randomly sample this many output_type_ids from those available
-    # for smh_model, since they're arbitrary per model and not necessarily sequential
+    # for smh_model, since they're arbitrary per model and not necessarily sequential. Sampled
+    # independently within each (round, location, model), so every location gets trajectories
     smh_num_otid: int | None = None
     smh_otid_seed: int | None = None
 
