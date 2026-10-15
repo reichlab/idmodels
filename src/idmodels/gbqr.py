@@ -35,6 +35,11 @@ def _smh_otid(season: pd.Series) -> pd.Series:
     return season.str.split("-", n=1).str[1]
 
 
+def _ref_date_seed(run_config: RunConfig) -> int:
+    """Seed for random number generation, based on reference date, so reruns for a date are reproducible."""
+    return int(calendar.timegm(run_config.ref_date.timetuple()))
+
+
 class GBQRModel(IDModel):
     """Gradient Boosted Quantile Regression forecast model."""
 
@@ -46,7 +51,8 @@ class GBQRModel(IDModel):
         self.model_config: GBQRModelConfig = model_config
 
 
-    def _resolve_smh_otid(self, df_smh: pd.DataFrame, model_config: GBQRModelConfig) -> pd.DataFrame | None:
+    def _resolve_smh_otid(self, df_smh: pd.DataFrame, model_config: GBQRModelConfig,
+                          run_config: RunConfig) -> pd.DataFrame | None:
         """
         Resolve the SMH output_type_ids (trajectory sample ids) to filter to, as a
         ["round", "location", "source", "otid"] DataFrame of keys to join against, or None if no
@@ -72,7 +78,10 @@ class GBQRModel(IDModel):
         if model_config.smh_otid:
             return df_keys.loc[df_keys["otid"].isin(model_config.smh_otid)]
 
-        rng = np.random.default_rng(model_config.smh_otid_seed)
+        # default to the same ref_date-based seed as the rest of GBQR, so a rerun for the same date samples the
+        # same trajectories
+        seed = model_config.smh_otid_seed if model_config.smh_otid_seed is not None else _ref_date_seed(run_config)
+        rng = np.random.default_rng(seed)
 
         sampled_frames = []
         for (r, loc, src), group in df_keys.groupby(["round", "location", "source"]):
@@ -114,7 +123,14 @@ class GBQRModel(IDModel):
                 f"ref_date={run_config.ref_date}."
             )
 
-        df_keys = self._resolve_smh_otid(df_smh, model_config)
+        df_keys = self._resolve_smh_otid(df_smh, model_config, run_config)
+        if model_config.smh_num_otid and run_config.artifact_store_root is not None:
+            # record the randomly sampled trajectories so a run can be traced back to them
+            save_path = build_save_path(root=run_config.artifact_store_root,
+                                        run_config=run_config,
+                                        model_config=model_config,
+                                        subdir="smh_otid")
+            df_keys.to_csv(save_path, index=False)
         if df_keys is not None:
             df_smh = df_smh.assign(otid=_smh_otid(df_smh["season"])) \
                             .merge(df_keys, on=["round", "location", "source", "otid"], how="inner") \
@@ -280,9 +296,7 @@ class GBQRModel(IDModel):
 
 
     def _get_test_quantile_predictions(self, run_config, df_train, x_train, y_train, x_test):
-        # seed for random number generation, based on reference date
-        rng_seed = int(calendar.timegm(run_config.ref_date.timetuple()))
-        rng = np.random.default_rng(seed=rng_seed)
+        rng = np.random.default_rng(seed=_ref_date_seed(run_config))
         # seeds for lgb model fits, one per combination of bag and quantile level
         lgb_seeds = rng.integers(1e8, size=(self.model_config.num_bags, len(run_config.q_levels)))
 

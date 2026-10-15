@@ -285,6 +285,33 @@ def test_gbqr_filter_smh_num_otid_is_reproducible_with_seed(make_run_config):
     assert sample() == sample()
 
 
+def test_gbqr_filter_smh_num_otid_defaults_to_ref_date_seed_and_saves_ids(make_run_config):
+    """
+    With smh_otid_seed unset, sampling uses GBQR's ref_date-based seed, so reruns for the same
+    ref_date sample the same ids, and the sampled ids are saved to the artifact store.
+    """
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    df = pd.DataFrame(_smh_otid_rows([str(i) for i in range(20)], locations=("syn-US", "syn-01")))
+
+    def sample():
+        model_config = create_test_gbqr_model_config(
+            main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
+        )
+        model_config.smh_num_otid = 3
+        assert model_config.smh_otid_seed is None
+        filtered_df = GBQRModel(model_config)._filter_smh(df.copy(), model_config, run_config)
+        return model_config, set(filtered_df["id"])
+
+    model_config, kept_ids = sample()
+    assert sample()[1] == kept_ids
+
+    save_path = (run_config.artifact_store_root / f"UMass-{model_config.model_name}" / "smh_otid" /
+                 f"{run_config.ref_date}-UMass-{model_config.model_name}.csv")
+    saved = pd.read_csv(save_path, dtype={"otid": str})
+    assert list(saved.columns) == ["round", "location", "source", "otid"]
+    assert {f"smh_{row.location}_{row.otid}" for row in saved.itertuples()} == kept_ids - {"surveillance"}
+
+
 def test_gbqr_filter_smh_num_otid_raises_if_more_than_available(make_run_config):
     model_config = create_test_gbqr_model_config(
         main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
