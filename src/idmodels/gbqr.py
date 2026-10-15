@@ -46,13 +46,14 @@ class GBQRModel(IDModel):
         self.model_config: GBQRModelConfig = model_config
 
 
-    def _resolve_smh_otid(self, df_smh: pd.DataFrame, model_config: GBQRModelConfig) -> list[str] | pd.DataFrame:
+    def _resolve_smh_otid(self, df_smh: pd.DataFrame, model_config: GBQRModelConfig) -> pd.DataFrame | None:
         """
-        Resolve the SMH output_type_ids (trajectory sample ids) to filter to. If smh_otid was set
-        explicitly, use it as-is (applied globally, across every round/location alike). If
-        smh_num_otid was set instead, randomly sample that many ids independently within each
-        (round, location, source) group and return a ["round", "location", "source", "otid"]
-        DataFrame to join against: output_type_id is NOT a globally consistent identifier across
+        Resolve the SMH output_type_ids (trajectory sample ids) to filter to, as a
+        ["round", "location", "source", "otid"] DataFrame of keys to join against, or None if no
+        trajectory filter applies (neither smh_otid nor smh_num_otid is set). If smh_otid was set
+        explicitly, keep the keys whose otid is in it (applied globally, across every round/location
+        alike). If smh_num_otid was set instead, randomly sample that many ids independently within
+        each (round, location, source) group: output_type_id is NOT a globally consistent identifier across
         rounds -- round 4 shares each id across every location (a true trajectory sample), but
         rounds 5+ scope each id to a single location (an arbitrary per-location index, disjoint
         from other locations' ids). Sampling from the pooled, round/location-agnostic set of ids
@@ -63,14 +64,18 @@ class GBQRModel(IDModel):
         back on (round, location) alone -- would let one sampled id match unrelated rows from every
         other model that happens to reuse that same id string.
         """
-        if model_config.smh_otid or not model_config.smh_num_otid:
-            return model_config.smh_otid
+        if not model_config.smh_otid and not model_config.smh_num_otid:
+            return None
 
-        df_smh = df_smh.assign(otid=_smh_otid(df_smh["season"]))
+        df_keys = df_smh.assign(otid=_smh_otid(df_smh["season"]))[["round", "location", "source", "otid"]] \
+                        .drop_duplicates()
+        if model_config.smh_otid:
+            return df_keys.loc[df_keys["otid"].isin(model_config.smh_otid)]
+
         rng = np.random.default_rng(model_config.smh_otid_seed)
 
         sampled_frames = []
-        for (r, loc, src), group in df_smh.groupby(["round", "location", "source"]):
+        for (r, loc, src), group in df_keys.groupby(["round", "location", "source"]):
             available = sorted(group["otid"].unique())
             if model_config.smh_num_otid > len(available):
                 raise ValueError(
@@ -84,8 +89,7 @@ class GBQRModel(IDModel):
         # when there are no SMH rows to sample from, return an empty frame that keeps df_smh's key
         # dtypes: a bare pd.DataFrame(columns=...) has object-dtype columns, which pandas refuses to
         # merge against the numeric `round` column in _filter_smh
-        return pd.concat(sampled_frames, ignore_index=True) if sampled_frames else \
-            df_smh[["round", "location", "source", "otid"]].iloc[0:0]
+        return pd.concat(sampled_frames, ignore_index=True) if sampled_frames else df_keys.iloc[0:0]
 
 
     def _filter_smh(self, df: pd.DataFrame, model_config: GBQRModelConfig, run_config: RunConfig) -> pd.DataFrame:
@@ -110,18 +114,15 @@ class GBQRModel(IDModel):
                 f"ref_date={run_config.ref_date}."
             )
 
-        resolved = self._resolve_smh_otid(df_smh, model_config)
-        if isinstance(resolved, pd.DataFrame):
+        df_keys = self._resolve_smh_otid(df_smh, model_config)
+        if df_keys is not None:
             df_smh = df_smh.assign(otid=_smh_otid(df_smh["season"])) \
-                            .merge(resolved, on=["round", "location", "source", "otid"], how="inner") \
+                            .merge(df_keys, on=["round", "location", "source", "otid"], how="inner") \
                             .drop(columns=["otid"])
-        elif resolved:
-            # explicit global list (smh_otid set directly)
-            df_smh = df_smh.loc[_smh_otid(df_smh["season"]).isin(resolved)]
             if df_smh.empty:
                 raise ValueError(
                     f"No SMH rows for smh_model={model_config.smh_model} before ref_date={run_config.ref_date} "
-                    f"match smh_otid={resolved}."
+                    f"match smh_otid={model_config.smh_otid}."
                 )
 
         df_smh = df_smh.drop(columns=["round"])
