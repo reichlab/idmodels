@@ -27,6 +27,14 @@ from idmodels.model import IDModel
 from idmodels.utils import build_save_path
 
 
+def _smh_otid(season: pd.Series) -> pd.Series:
+    """
+    Extract the output_type_id (trajectory sample id) from SMH season strings, which are formatted
+    "{season}{scenario_letter}-{output_type_id}" (see iddata.sources.smh.SMHDataSource.load).
+    """
+    return season.str.split("-", n=1).str[1]
+
+
 class GBQRModel(IDModel):
     """Gradient Boosted Quantile Regression forecast model."""
 
@@ -58,7 +66,7 @@ class GBQRModel(IDModel):
         if model_config.smh_otid or not model_config.smh_num_otid:
             return model_config.smh_otid
 
-        df_smh = df_smh.assign(otid=df_smh["season"].str[9:])
+        df_smh = df_smh.assign(otid=_smh_otid(df_smh["season"]))
         rng = np.random.default_rng(model_config.smh_otid_seed)
 
         sampled_frames = []
@@ -104,12 +112,12 @@ class GBQRModel(IDModel):
 
         resolved = self._resolve_smh_otid(df_smh, model_config)
         if isinstance(resolved, pd.DataFrame):
-            df_smh = df_smh.assign(otid=df_smh["season"].str[9:]) \
+            df_smh = df_smh.assign(otid=_smh_otid(df_smh["season"])) \
                             .merge(resolved, on=["round", "location", "source", "otid"], how="inner") \
                             .drop(columns=["otid"])
         elif resolved:
             # explicit global list (smh_otid set directly)
-            df_smh = df_smh.loc[df_smh["season"].str[9:].isin(resolved)]
+            df_smh = df_smh.loc[_smh_otid(df_smh["season"]).isin(resolved)]
             if df_smh.empty:
                 raise ValueError(
                     f"No SMH rows for smh_model={model_config.smh_model} before ref_date={run_config.ref_date} "
