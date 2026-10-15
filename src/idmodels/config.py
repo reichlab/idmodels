@@ -106,3 +106,6 @@ class GBQRModelConfig(ModelConfig):
         super().__post_init__()
         if self.smh_otid and self.smh_num_otid:
             raise ValueError("Set at most one of smh_otid (an explicit list) and smh_num_otid (a random sample size).")
+        # without this, smh_num_otid=0 would be falsy and silently mean "no trajectory filter" (all trajectories)
+        if self.smh_num_otid is not None and self.smh_num_otid < 1:
+            raise ValueError(f"smh_num_otid must be at least 1 (or None), got {self.smh_num_otid}.")

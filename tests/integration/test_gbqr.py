@@ -310,6 +310,19 @@ def test_gbqr_model_config_rejects_both_smh_otid_and_smh_num_otid():
         )
 
 
+@pytest.mark.parametrize("smh_num_otid", [0, -1])
+def test_gbqr_model_config_rejects_smh_num_otid_below_one(smh_num_otid):
+    """smh_num_otid=0 is falsy, so without validation it would silently mean "all trajectories"."""
+    with pytest.raises(ValueError, match="at least 1"):
+        GBQRModelConfig(
+            model_name="gbqr_bad_config",
+            main_source=SourceType.NHSN,
+            fit_locations_separately=False,
+            power_transform=PowerTransform.FOURTH_ROOT,
+            smh_num_otid=smh_num_otid,
+        )
+
+
 @pytest.mark.parametrize("smh_model, smh_otid, smh_num_otid, ref_date, match", [
     (["NoSuchModel"], [], 2, "2024-12-07", "No SMH rows found for smh_model"),
     (["NoSuchModel"], [], None, "2024-12-07", "No SMH rows found for smh_model"),
