@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0]
+
+### Added
+- Scenario Modeling Hub (SMH) trajectory data as a GBQR training source (`SourceType.SMH`, flu only), via iddata's `SMHDataSource`
+- `GBQRModelConfig` fields for filtering SMH trajectories: `smh_model`, `smh_otid` (explicit output_type_ids), `smh_num_otid` (randomly sample this many ids within each round, location, and model), and `smh_otid_seed`
+- When `smh_num_otid` is set and `artifact_store_root` is configured, the sampled trajectory ids are saved under `UMass-{model_name}/smh_otid/`
+- `IDModel._filter_sources_df()` hook for subclasses to filter the combined, loaded sources DataFrame
+- `group_columns` parameter on `LagFeature`, `TaylorFeature`, and `HorizonTargetFeature` (default `["source", "location"]`)
+- Warning when SMH is combined with `fit_locations_separately=True`, raised both when the config is created and at run time, since per-location fits never use SMH data
+- `joblib` dependency
+
+### Changed
+- **Breaking** (forecast output): GBQR features for flu/RSV are now grouped by `(source, location, season)` instead of `(source, location)`, for every run, not only SMH ones. Lags, rolling means, Taylor features, and horizon targets no longer bridge gaps between seasons. This fixes FluSurvNet (which only reports season weeks ~10-40) taking early-season lags from the previous April and late-season horizon targets from the following October. It also keeps SMH trajectories separate. For year-round sources, only training rows at season weeks 5-7 change
+- GBQR bag × quantile model fits now run in parallel with `joblib` (threads), with results still deterministic
+- `RollingMeanFeature` now honors its `group_columns` argument (previously overridden), and its default is `["source", "location"]` to match the other features
+- `IDModel._filter_locations()` matches requested states on the last two characters of `location`, restricted to state/national rows, so SMH's synthetic `syn-XX` locations are kept
+- `GBQRModel` uses the same `ref_date`-based seed for SMH trajectory sampling (when `smh_otid_seed` is unset) as for bagging
+- Updated `iddata` dependency to `6f55530`
+
+### Fixed
+- `GBQRModel` silently writing an empty submission CSV when the main source's latest week lagged another source's; the test set is now the main source's latest week
+- `IDModel._raise_if_incomplete()` now also raises on an empty prediction set
+
+### Removed
+- `tqdm` as a direct dependency (no longer used; it is still installed via `numpyro`)
+
 ## [2.1.0]
 
 ### Added
