@@ -1,4 +1,5 @@
 import datetime
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -337,6 +338,33 @@ def test_gbqr_model_config_rejects_both_smh_otid_and_smh_num_otid():
         )
 
 
+def test_gbqr_model_config_warns_smh_unused_when_fitting_locations_separately():
+    with pytest.warns(UserWarning, match="SMH data will not be used"):
+        GBQRModelConfig(
+            model_name="gbqr_smh_separate",
+            main_source=SourceType.NHSN,
+            supplementary_sources=[SourceType.SMH],
+            fit_locations_separately=True,
+            power_transform=PowerTransform.FOURTH_ROOT,
+        )
+
+
+@pytest.mark.parametrize("supplementary_sources, fit_locations_separately", [
+    ([SourceType.SMH], False),
+    ([SourceType.ILINET], True),
+])
+def test_gbqr_model_config_no_smh_warning_otherwise(supplementary_sources, fit_locations_separately):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        GBQRModelConfig(
+            model_name="gbqr_no_warning",
+            main_source=SourceType.NHSN,
+            supplementary_sources=supplementary_sources,
+            fit_locations_separately=fit_locations_separately,
+            power_transform=PowerTransform.FOURTH_ROOT,
+        )
+
+
 @pytest.mark.parametrize("smh_num_otid", [0, -1])
 def test_gbqr_model_config_rejects_smh_num_otid_below_one(smh_num_otid):
     """smh_num_otid=0 is falsy, so without validation it would silently mean "all trajectories"."""
@@ -633,6 +661,59 @@ def test_gbqr_test_set_uses_main_source_latest_week_when_supplementary_source_is
     assert not preds_df.empty
     assert set(preds_df["source"].unique()) == {"nhsn"}
     assert set(preds_df["wk_end_date"].unique()) == {pd.Timestamp("2024-01-06")}
+
+
+def test_gbqr_fit_locations_separately_excludes_smh(make_run_config):
+    """
+    With fit_locations_separately=True, there is one fit per main-source location, and by design SMH rows
+    don't contribute to any of them: SMH's synthetic locations ("syn-01") give it unique_ids ("statesyn-01")
+    that never match a real location's ("state01"), and no fit is run for the synthetic locations themselves.
+    """
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH])
+    model_config.fit_locations_separately = True
+    model_config.num_bags = 2
+    model_config.bag_frac_samples = 1.0
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-13"), states=["01", "02"], hsas=[])
+
+    dates = pd.to_datetime(["2023-12-16", "2023-12-23", "2023-12-30", "2024-01-06"])
+    rows = []
+    for source, location, season in [("nhsn", "01", "2023/24"), ("nhsn", "02", "2023/24"),
+                                     ("smh-NotreDame-FRED", "syn-01", "2023/24A-1")]:
+        for i, wk_end_date in enumerate(dates):
+            rows.append({
+                "source": source,
+                "agg_level": "state",
+                "location": location,
+                "unique_id": "state" + location,
+                "wk_end_date": wk_end_date,
+                "pop": 1_000_000,
+                "inc_trans_cs": 0.1 * (i + 1),
+                "horizon": 1,
+                "inc_trans_center_factor": 0.0,
+                "inc_trans_scale_factor": 1.0,
+                "season": season,
+                "season_week": 10,
+                "delta_target": None if wk_end_date == dates.max() else 0.05 * (i + 1),
+                "feat1": float(i),
+            })
+    df = pd.DataFrame(rows)
+
+    model = GBQRModel(model_config)
+    train_sources_by_uid = {}
+    train_gbq_and_predict = model._train_gbq_and_predict
+
+    def spy(run_config, df_train, df_test, feat_names, unique_id=None):
+        train_sources_by_uid[unique_id] = set(df_train.loc[df_train["unique_id"] == unique_id, "source"])
+        return train_gbq_and_predict(run_config, df_train, df_test, feat_names, unique_id)
+
+    # fit_locations_separately was set after construction, so only the run-time warning can catch it
+    with patch.object(model, "_train_gbq_and_predict", side_effect=spy), \
+            patch.object(lightgbm.sklearn.LGBMModel, "predict", side_effect=lambda X: numpy.full(len(X), 0.1)), \
+            pytest.warns(UserWarning, match="SMH data will not be used"):
+        preds_df = model._fit_and_predict(df, feat_names=["feat1"], run_config=run_config)
+
+    assert train_sources_by_uid == {"state01": {"nhsn"}, "state02": {"nhsn"}}
+    assert set(preds_df["location"].unique()) == {"01", "02"}
 
 
 def create_test_gbqr_model_config(main_source, supplementary_sources=[], smh_model=[], smh_otid=[], custom_name=None):

@@ -1,4 +1,5 @@
 import datetime
+import warnings
 from abc import ABC
 from dataclasses import dataclass, field
 from enum import Enum
@@ -7,6 +8,12 @@ from pathlib import Path
 from iddata.enums import (
     Disease,  # used internally for RunConfig.disease; import from iddata.enums directly in callers
     SourceType,  # re-exported for callers: from idmodels.config import SourceType
+)
+
+SMH_UNUSED_WHEN_FITTING_SEPARATELY = (
+    "SMH is a source but fit_locations_separately=True: SMH data will not be used for fitting, since "
+    "per-location fits only train on each real location's own rows and never include SMH's synthetic "
+    "'syn-' locations."
 )
 
 
@@ -80,7 +87,8 @@ class GBQRModelConfig(ModelConfig):
     reporting_adj: bool = False
     save_feat_importance: bool = False
     
-    # smh trajectory filters
+    # smh trajectory filters. SMH rows are only used when fit_locations_separately=False: per-location
+    # fits train on each real location's own rows, which never include SMH's synthetic "syn-" locations
     smh_model: list[str] = field(default_factory=list)
     # explicit output_type_ids (trajectory sample ids), applied as-is across every round and location.
     # Note that ids only mean "the same trajectory everywhere" in round 4: rounds 5+ scope each id to a
@@ -111,3 +119,6 @@ class GBQRModelConfig(ModelConfig):
         # without this, smh_num_otid=0 would be falsy and silently mean "no trajectory filter" (all trajectories)
         if self.smh_num_otid is not None and self.smh_num_otid < 1:
             raise ValueError(f"smh_num_otid must be at least 1 (or None), got {self.smh_num_otid}.")
+        # also warned at run time (GBQRModel._fit_and_predict), in case the config is changed after construction
+        if self.fit_locations_separately and SourceType.SMH in [self.main_source] + self.supplementary_sources:
+            warnings.warn(SMH_UNUSED_WHEN_FITTING_SEPARATELY, stacklevel=3)

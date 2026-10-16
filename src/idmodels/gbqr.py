@@ -1,4 +1,5 @@
 import calendar
+import warnings
 
 import lightgbm as lgb
 import numpy as np
@@ -11,7 +12,7 @@ from iddata.sources.nssp import NSSPDataSource
 from iddata.sources.smh import SMHDataSource
 from joblib import Parallel, delayed
 
-from idmodels.config import GBQRModelConfig, RunConfig, SourceType
+from idmodels.config import SMH_UNUSED_WHEN_FITTING_SEPARATELY, GBQRModelConfig, RunConfig, SourceType
 from idmodels.features import (
     DirectionalWaveFeature,
     FeaturePipeline,
@@ -242,6 +243,11 @@ class GBQRModel(IDModel):
 
         # train model and obtain test set predictions
         if self.model_config.fit_locations_separately:
+            # one fit per main-source location (df_test holds only main-source rows). By design, SMH rows
+            # don't contribute to these fits: their synthetic locations ("syn-06") give them unique_ids
+            # ("statesyn-06") that never match a real location's ("state06"), so SMH only informs jointly fit models
+            if SourceType.SMH in [self.model_config.main_source] + self.model_config.supplementary_sources:
+                warnings.warn(SMH_UNUSED_WHEN_FITTING_SEPARATELY)
             unique_ids = df_test["unique_id"].unique()
             preds_df = pd.concat(
                 [self._train_gbq_and_predict(run_config, df_train, df_test, feat_names, uid)
