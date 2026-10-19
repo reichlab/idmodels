@@ -1,13 +1,15 @@
 """
 Model for revisions ("backfill") to recently reported NHSN admission counts.
 
-For a data vintage released on date a, let L_a be the most recent week in that vintage. The revision at lag j is
-    rho_j = log((final count for week L_a - j + 1) / (count reported in vintage a for week L_a - j + 1)),
-where "final" is the most recent vintage available. A revision vector (rho_0, ..., rho_{J-1}) is recorded for every
-(location, vintage) pair whose final values have had at least J weeks to mature. New revision draws are produced by
-resampling whole vectors (a block bootstrap), which keeps the dependence between revisions at different lags within a
-single release. Vectors are grouped into strata by the size of the reported lag-0 count, because small counts are
-revised proportionally more.
+For a data vintage (one release of the data) on date a, let L_a be the most recent week in that vintage. The revision
+at lag j (j = 0 for week L_a itself) is
+    rho_j = log((F + 1) / (R + 1)),
+where R is the count reported in vintage a for week L_a - j, F is the count for the same week in the most recent
+vintage available ("final"), and 1 is added to keep zero counts defined. A revision vector
+(rho_0, ..., rho_{J-1}) is recorded for every (location, vintage) pair whose final values have had at least J weeks to
+mature. New revision draws are produced by resampling whole vectors (a block bootstrap), which keeps the dependence
+between revisions at different lags within a single release. Vectors are grouped into strata by the size of the
+reported lag-0 count, because small counts are revised proportionally more.
 """
 
 import datetime

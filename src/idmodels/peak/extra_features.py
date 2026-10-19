@@ -1,6 +1,6 @@
 """
-Optional candidate features for the direct peak models, beyond series.state_features (ported from the exploratory
-analysis in the sandbox, analysis/peak-models/relative_size_predictors.py, with identical definitions and names).
+Optional feature groups for the direct peak models, in addition to the core features of series.state_features. A
+model uses a group only if its configuration lists it (see PeakGBQRModelConfig.size_feature_groups).
 
 All are computed from data through the current season week t only (plus a calendar that is known in advance, fixed
 state centroids, and influenza type/subtype counts through week t). Groups:
@@ -18,6 +18,8 @@ import warnings
 
 import numpy as np
 import pandas as pd
+
+from idmodels.peak.dates import season_week_to_date
 
 STATE_CENTROIDS = {
     "01": (32.59, -86.75),
@@ -134,7 +136,8 @@ MIN_POS = 20
 N_WEEKS = 53
 
 
-def _ffill(y: np.ndarray) -> np.ndarray:
+def ffill(y: np.ndarray) -> np.ndarray:
+    """Forward fill missing values along axis 1."""
     idx = np.where(np.isnan(y), 0, np.arange(y.shape[1]))
     np.maximum.accumulate(idx, axis=1, out=idx)
     return y[np.arange(y.shape[0])[:, None], idx]
@@ -157,8 +160,6 @@ _TAYLOR = {
 
 def holiday_weeks(season: str) -> list[int]:
     """Season weeks of `season` whose Saturday week-ending date falls in Dec 22 - Jan 7."""
-    from idmodels.peak.base import season_week_to_date
-
     y0 = int(season[:4])
     lo, hi = datetime.date(y0, 12, 22), datetime.date(y0 + 1, 1, 7)
     return [w for w in range(15, 30) if lo <= season_week_to_date(season, w) <= hi]
@@ -218,7 +219,7 @@ def extra_features(
     types: dict | None = None,
 ) -> pd.DataFrame:
     """
-    Candidate features at season week t (see module docstring). y (n, 53) is the season so far (only y[:, :t] is
+    Optional features at season week t (see module docstring). y (n, 53) is the season so far (only y[:, :t] is
     used); lm and max_week are the log running maximum and its week from series.state_features. Groups whose inputs
     are not supplied (holiday, latlon, types) are NaN.
     """
@@ -226,7 +227,7 @@ def extra_features(
     W0 = window_start
     eps = np.asarray(eps, dtype=float)
     yt = y[:, :t]
-    yf = _ffill(yt)
+    yf = ffill(yt)
     L = np.log(yf + eps[:, None])
     lx = L[:, t - 1]
     wsm = t - max_week

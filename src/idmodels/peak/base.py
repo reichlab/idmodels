@@ -1,12 +1,19 @@
 """
 Base class for direct models of the seasonal peak week and peak size of NHSN influenza hospital admissions.
 
+Notation. For a season observed through season week t, M_t is the running maximum of the in-window weeks observed so
+far, and k = peak week - t is the number of weeks until the season's peak (k <= 0: the peak has already occurred).
 A concrete model supplies _fit() and _predict(). _predict() maps state features (see idmodels.peak.series) to
   - timing probabilities over classes c = 0, 1, ..., kmax, where c = 0 means "the peak has already occurred"
     (k <= 0) and c = k >= 1 means "the peak is k weeks after the most recent observed week";
-  - quantiles of z = log(peak + eps) - log(M_t + eps) at levels self.size_levels.
+  - quantiles of z = log(peak + eps) - log(M_t + eps), the log growth still to come in the running maximum, at levels
+    self.size_levels.
 The base class turns these into hub submissions, propagating uncertainty about revisions to recent data by
 recomputing features and predictions on Monte Carlo draws of the revised series (see idmodels.peak.revision).
+
+PeakModel does not subclass idmodels.model.IDModel: IDModel's workflow (transform the weekly series, build lagged
+features, predict each horizon) does not fit targets that are a single value per season, which are learned instead
+from historical seasons replayed week by week (idmodels.peak.series.build_replay_rows).
 """
 
 import calendar
@@ -23,9 +30,9 @@ from iddata.sources.flusurvnet import FluSurvNetDataSource
 from iddata.sources.ilinet import ILINetDataSource
 from iddata.sources.nhsn import NHSNDataSource
 from iddata.sources.nssp import NSSPDataSource
-from iddata.utils import add_season_columns
 
 from idmodels.config import PeakModelConfig, RunConfig, SourceType
+from idmodels.peak.dates import season_of, season_week_to_date
 from idmodels.peak.extra_features import centroids, holiday_matrix, type_arrays
 from idmodels.peak.revision import RevisionModel, apply_revisions, load_nhsn_vintages
 from idmodels.peak.series import (
@@ -57,38 +64,6 @@ class PeakInputs:
     strain: dict | None = None
 
 
-@dataclass
-class CurrentSeason:
-    """The current season as reported on the forecast date, one row per forecast location."""
-
-    reported: np.ndarray  # (n_loc, N_SEASON_WEEKS) reported values in source units; weeks not yet reported are NaN
-    t: np.ndarray  # (n_loc,) current season week: the last reported week + 1
-    locations: list[str]
-    source: str
-    eps: float
-    hist_peak: np.ndarray  # (n_loc,) mean log(peak + eps) of the location's earlier seasons of this source (or NaN)
-    nat_row: int  # row of the national series (-1 if none)
-    hist_total: np.ndarray | None = None  # (n_loc,) mean season total in earlier seasons (see series.state_features)
-    hist_cum: np.ndarray | None = None  # (n_loc, N_SEASON_WEEKS) mean cumulative curve in earlier seasons
-
-
-def season_of(date: datetime.date) -> str:
-    return add_season_columns(pd.DataFrame({"wk_end_date": [str(date)], "location": ["US"]}))["season"].iloc[0]
-
-
-def season_week_to_date(season: str, season_week: int) -> datetime.date:
-    """The Saturday ending the given season week of the given season."""
-    start_year = int(season[:4])
-    # season week 1 is MMWR week 31; find the Saturday ending it by scanning late July / early August
-    for day in range(20, 40):
-        d = datetime.date(start_year, 7, 1) + datetime.timedelta(days=day)
-        if d.weekday() == 5:
-            sw = add_season_columns(pd.DataFrame({"wk_end_date": [str(d)], "location": ["US"]}))["season_week"].iloc[0]
-            if sw == 1:
-                return d + datetime.timedelta(weeks=season_week - 1)
-    raise ValueError(f"could not locate season week 1 of {season}")
-
-
 class PeakModel(ABC):
     """Abstract base for direct peak models. See module docstring."""
 
@@ -104,11 +79,6 @@ class PeakModel(ABC):
         inputs = self.load_inputs(run_config.ref_date)
         preds_df = self.forecast(inputs, run_config)
         save_path = build_save_path(root=run_config.output_root, run_config=run_config, model_config=self.model_config)
-        if preds_df["value"].isna().any():
-            raise ValueError(
-                f"NaN forecast values for {self.model_config.model_name} at {run_config.ref_date}; "
-                f"refusing to write {save_path}"
-            )
         preds_df.to_csv(save_path, index=False, na_rep="NA")
         return preds_df
 
@@ -116,18 +86,16 @@ class PeakModel(ABC):
         sources = [SourceType.NHSN] + list(self.model_config.supplementary_sources)
         key = (tuple(s.value for s in sources), ref_date)
         if key not in _DATA_CACHE:
-            src_objs = []
-            for s in sources:
-                if s == SourceType.NHSN:
-                    src_objs.append(NHSNDataSource())
-                elif s == SourceType.ILINET:
-                    src_objs.append(ILINetDataSource())
-                elif s == SourceType.FLUSURVNET:
-                    src_objs.append(FluSurvNetDataSource())
-                elif s == SourceType.NSSP:
-                    continue  # loaded separately below
-                else:
-                    raise ValueError(f"unsupported source for peak models: {s}")
+            # NSSP is loaded separately below
+            source_map = {
+                SourceType.NHSN: NHSNDataSource(),
+                SourceType.ILINET: ILINetDataSource(),
+                SourceType.FLUSURVNET: FluSurvNetDataSource(),
+            }
+            unsupported = [s for s in sources if s not in source_map and s != SourceType.NSSP]
+            if unsupported:
+                raise ValueError(f"unsupported sources for peak models: {unsupported}")
+            src_objs = [source_map[s] for s in sources if s in source_map]
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 data = DiseaseDataLoader().load(sources=src_objs, as_of=ref_date, ancillary=[PopulationData()])
@@ -155,6 +123,10 @@ class PeakModel(ABC):
         self.fit(inputs.data, season, run_config.q_levels, strain=inputs.strain)
         rng = np.random.default_rng(int(calendar.timegm(run_config.ref_date.timetuple())))
         pmf, quantiles, locations = self._predict_current_season(inputs, season, run_config, rng)
+        # fail loudly rather than return (or write) an incomplete submission
+        if np.isnan(pmf).any() or np.isnan(quantiles).any():
+            bad = [loc for loc, p, q in zip(locations, pmf, quantiles) if np.isnan(p).any() or np.isnan(q).any()]
+            raise ValueError(f"NaN forecast values for {self.model_config.model_name} at {run_config.ref_date}: {bad}")
         return self._format_output(pmf, quantiles, locations, season, run_config)
 
     # ---------------------------------------------------------------------------------------------------------------
@@ -180,13 +152,14 @@ class PeakModel(ABC):
         """
         Fit to all seasons of `data` (long-format iddata output, any sources) strictly before `season`. The fit only
         changes when the season does (up to minor revisions to earlier seasons' data), so it is repeated only when
-        (season, quantile levels) changes. `strain` (optional) maps (geography, season) to weekly A, B, A(H1), A(H3)
-        positives for the type/subtype features (idmodels.peak.extra_features.type_arrays).
+        the season, the quantile levels or whether `strain` is supplied changes. `strain` (optional) maps (geography,
+        season) to weekly A, B, A(H1), A(H3) positives for the type/subtype features
+        (idmodels.peak.extra_features.type_arrays).
         """
         cfg = self.model_config
         self.size_levels = np.asarray(q_levels, dtype=float)
         self.kmax = cfg.window_end_week - 1
-        key = (season, tuple(self.size_levels))
+        key = (season, tuple(self.size_levels), strain is not None)
         if self._fitted_key == key:
             return
         train = data.loc[data["season"] < season]
@@ -267,7 +240,7 @@ class PeakModel(ABC):
         self, inputs: PeakInputs, season: str, run_config: RunConfig, rng: np.random.Generator
     ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         cfg = self.model_config
-        locations = [loc for loc in run_config.states]
+        locations = list(run_config.states)
         counts, pop = self._current_counts(inputs, season, locations)
         has_data = ~np.all(np.isnan(counts), axis=1) & ~np.isnan(pop)
         if not has_data.all():
@@ -309,13 +282,13 @@ class PeakModel(ABC):
         strain: dict | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
-        Peak forecasts for season-aligned series of any source. Used to validate the models on sources other than
+        Peak forecasts for season-aligned series of any source, e.g. to evaluate the models on sources other than
         NHSN. `reported` (n_loc, N_SEASON_WEEKS) holds the values available at the time of the forecast, with every
         later week missing. Without `revision_model` the reported values are taken as final; with it, the model is
-        applied to num_revision_draws simulated final versions (as for NHSN; the revision model's offset is used).
-        `season` enables the holiday features and `strain` (as in fit(), counts known at the forecast date) the
-        type/subtype features. Call fit() first. Returns the peak week pmf over window weeks (n_loc, n_weeks) and peak size quantiles at
-        self.size_levels in the source's units (n_loc, n_q).
+        applied to num_revision_draws simulated final versions, as in forecast(), with revisions applied on the
+        revision model's offset scale. `season` enables the holiday features and `strain` (as in fit(), counts known
+        at the forecast date) the type/subtype features. Call fit() first. Returns the peak week pmf over window weeks
+        (n_loc, n_weeks) and peak size quantiles at self.size_levels in the source's units (n_loc, n_q).
         """
         if revision_model is None:
             rates = reported[:, None, :]
@@ -330,9 +303,6 @@ class PeakModel(ABC):
         )
         quantiles = np.maximum.accumulate(np.quantile(peak, self.size_levels, axis=1).T, axis=1)
         return pmf, quantiles
-
-    def _observe_current_season(self, cur: CurrentSeason) -> None:
-        """Hook for models that learn from the partially observed current season before _predict. Default: no-op."""
 
     def _peak_distributions(
         self,
@@ -373,20 +343,6 @@ class PeakModel(ABC):
         hist_cum_loc = self.hist_cum_.reindex(src_keys).to_numpy()
         pool = np.asarray([loc != nat_loc for loc in locations])
         eps = np.full(n_loc * n_draws, LOG_EPS[source])
-
-        self._observe_current_season(
-            CurrentSeason(
-                reported=reported,
-                t=last_week + 1,
-                locations=list(locations),
-                source=source,
-                eps=LOG_EPS[source],
-                hist_peak=hist_peak_loc,
-                nat_row=locations.index(nat_loc) if nat_loc is not None else -1,
-                hist_total=hist_total_loc,
-                hist_cum=hist_cum_loc,
-            )
-        )
 
         t_of_row = (last_week + 1)[loc_of_row]
         row_locs = np.asarray(locations)[loc_of_row]

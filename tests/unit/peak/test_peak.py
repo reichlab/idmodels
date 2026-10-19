@@ -1,5 +1,4 @@
 import datetime
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -9,13 +8,10 @@ from iddata.enums import Disease
 from idmodels.config import (
     PeakBaselineModelConfig,
     PeakGBQRModelConfig,
-    PeakHierModelConfig,
-    PeakHybridModelConfig,
-    PeakKCDEModelConfig,
     RunConfig,
     SourceType,
 )
-from idmodels.peak import PeakBaselineModel, PeakGBQRModel, PeakHierModel, PeakHybridModel, PeakKCDEModel
+from idmodels.peak import PeakBaselineModel, PeakGBQRModel
 from idmodels.peak.base import PeakInputs, season_of, season_week_to_date
 from idmodels.peak.revision import RevisionModel, apply_revisions
 from idmodels.peak.series import (
@@ -222,15 +218,6 @@ class TestRevision:
                 size_offset=True,
             )
         ),
-        PeakKCDEModel(
-            PeakKCDEModelConfig(
-                model_name="peak_kcde",
-                supplementary_sources=[SourceType.ILINET],
-                num_revision_draws=20,
-                num_tuning_rows=100,
-                max_tuning_iter=5,
-            )
-        ),
         PeakGBQRModel(
             PeakGBQRModelConfig(
                 model_name="peak_gbqr",
@@ -252,44 +239,6 @@ class TestRevision:
                 size_offset=True,
                 size_feature_groups=["core", "sb", "trend", "bshare"],
                 timing_feature_groups=["core", "recession", "latlon", "holiday", "h3"],
-            )
-        ),
-        PeakHybridModel(
-            PeakHybridModelConfig(
-                model_name="peak_hybrid",
-                supplementary_sources=[SourceType.ILINET],
-                num_revision_draws=20,
-                num_warmup=20,
-                num_samples=20,
-                num_chains=1,
-                num_posterior_draws=10,
-                gbqr_num_bags=4,
-                gbqr_n_estimators=10,
-            )
-        ),
-        PeakHierModel(
-            PeakHierModelConfig(
-                model_name="peak_hier",
-                supplementary_sources=[SourceType.ILINET],
-                num_revision_draws=20,
-                num_warmup=20,
-                num_samples=20,
-                num_chains=1,
-                num_posterior_draws=10,
-                sync_burden_features=True,
-                time_varying_coefs=True,
-            )
-        ),
-        PeakHierModel(
-            PeakHierModelConfig(
-                model_name="peak_hier",
-                supplementary_sources=[SourceType.ILINET],
-                num_revision_draws=20,
-                num_warmup=20,
-                num_samples=20,
-                num_chains=1,
-                num_posterior_draws=10,
-                origin_stride=2,
             )
         ),
     ],
@@ -320,27 +269,14 @@ def test_forecast_is_valid_submission(model, tmp_path):
     pd.testing.assert_frame_equal(df, model.forecast(_synthetic_inputs(ref_date), run_config))
 
 
-def test_hier_t_survival_has_finite_hessian():
-    import jax
-
-    from idmodels.peak.hier import _log_sf
-
-    for nu in (1.5, 5.0, None):
-        for x in (-3.0, 0.0, 1e-8, 2.0):
-            h = jax.hessian(lambda s, nu=nu: _log_sf(s, nu))(x)
-            assert np.isfinite(float(h))
-    assert np.isclose(float(np.exp(_log_sf(0.0, 5.0))), 0.5, atol=1e-3)  # clamp error is O(1e-3.5) near 0
-    assert np.isclose(float(np.exp(_log_sf(1.0, 5.0))), 0.1816, atol=1e-3)
-
-
-def test_gbqr_oob_predictions_exclude_own_season():
+def test_gbqr_oob_predictions_exclude_own_season(tmp_path):
     ref_date = datetime.date(2026, 12, 19)
     model = PeakGBQRModel(
         PeakGBQRModelConfig(
             model_name="g", supplementary_sources=[SourceType.ILINET], num_bags=4, n_estimators=10, progress_bar=False
         )
     )
-    model.forecast(_synthetic_inputs(ref_date), _run_config(ref_date, Path("/tmp")))
+    model.forecast(_synthetic_inputs(ref_date), _run_config(ref_date, tmp_path))
     rows = model.train_rows_
     timing, size = model.oob_predict(rows)
     # raw GBQR timing may sum to < 1 where tail classes fall outside the window (renormalized downstream)
@@ -375,10 +311,10 @@ def test_extra_features_do_not_look_ahead():
     assert f1["b_share_3wk"].notna().all() and f1["lat"].isna().sum() == 1
 
 
-def test_gbqr_size_and_timing_features_are_independent():
+def test_gbqr_size_and_timing_features_are_independent(tmp_path):
     """Changing only the timing feature groups leaves the peak-size forecast unchanged, and vice versa."""
     ref_date = datetime.date(2026, 12, 19)
-    run_config = _run_config(ref_date, Path("/tmp"))
+    run_config = _run_config(ref_date, tmp_path)
 
     def forecast(size_groups, timing_groups):
         cfg = PeakGBQRModelConfig(

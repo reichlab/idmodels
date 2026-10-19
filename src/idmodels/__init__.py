@@ -4,7 +4,6 @@ from idmodels.config import (
     GBQRModelConfig,
     PeakBaselineModelConfig,
     PeakGBQRModelConfig,
-    PeakKCDEModelConfig,
     PoolingStrategy,
     PowerTransform,
     RunConfig,
@@ -12,7 +11,7 @@ from idmodels.config import (
     SARIXModelConfig,
 )
 from idmodels.gbqr import GBQRModel
-from idmodels.peak import PeakBaselineModel, PeakGBQRModel, PeakKCDEModel
+from idmodels.peak import PeakBaselineModel, PeakGBQRModel
 from idmodels.sarix import SARIXFourierModel, SARIXModel
 
 __all__ = [
@@ -23,8 +22,6 @@ __all__ = [
     "PeakBaselineModelConfig",
     "PeakGBQRModel",
     "PeakGBQRModelConfig",
-    "PeakKCDEModel",
-    "PeakKCDEModelConfig",
     "PoolingStrategy",
     "PowerTransform",
     "RunConfig",

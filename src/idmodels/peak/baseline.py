@@ -17,6 +17,8 @@ from idmodels.config import PeakBaselineModelConfig
 from idmodels.peak.base import PeakModel
 
 WSM_BINS = 5  # weeks since the running max: 0, 1, 2, 3, 4+
+# a (season week, weeks-since-max bin) cell with fewer training rows uses the quantiles of all rows near the week
+MIN_CELL_ROWS = 20
 
 
 def _wsm_bin(wks_since_max) -> np.ndarray:
@@ -24,7 +26,11 @@ def _wsm_bin(wks_since_max) -> np.ndarray:
 
 
 class PeakBaselineModel(PeakModel):
+    """Conditional-climatology peak model (see module docstring)."""
+
     def __init__(self, model_config: PeakBaselineModelConfig):
+        # Narrow self.model_config from PeakModelConfig to PeakBaselineModelConfig so that
+        # type checkers resolve PeakBaselineModelConfig-specific attributes in this class.
         super().__init__(model_config)
         self.model_config: PeakBaselineModelConfig = model_config
 
@@ -33,7 +39,8 @@ class PeakBaselineModel(PeakModel):
         rows = rows.assign(wsm_bin=_wsm_bin(rows["wks_since_max"]), peaked=(rows["k"] <= 0).astype(float))
         self._rows = rows
 
-        # P(already peaked | t, wsm bin), with a Jeffreys prior; zero before the window opens
+        # P(already peaked | t, weeks-since-max bin), with a Jeffreys prior (0.5 for cells with no training rows);
+        # zero before the window opens (see _predict)
         grp = rows.groupby(["season_week", "wsm_bin"])["peaked"].agg(["sum", "size"])
         self._p_peaked = ((grp["sum"] + 0.5) / (grp["size"] + 1.0)).to_dict()
 
@@ -43,7 +50,7 @@ class PeakBaselineModel(PeakModel):
             near = rows.loc[(rows["season_week"] - t).abs() <= cfg.size_week_halfwidth]
             for b in range(WSM_BINS):
                 zb = near.loc[near["wsm_bin"] == b, "z"].to_numpy()
-                if len(zb) < 20:
+                if len(zb) < MIN_CELL_ROWS:
                     zb = near["z"].to_numpy()
                 self._z_quantiles[(t, b)] = np.quantile(zb, self.size_levels)
 

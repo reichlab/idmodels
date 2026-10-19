@@ -1,6 +1,9 @@
 """
-Season-aligned series, state features, peak targets and the "season replay" training set used by the direct peak
-models.
+Season-aligned series, state features, peak targets and the training set used by the direct peak models.
+
+The training set is built by "season replay": each completed historical season is replayed week by week, and each
+week t gives one training row with the features computed from weeks 1..t and the targets (z, k; see
+idmodels.peak.base) computed from the full season.
 
 Every (source, location, season) series is stored as one row of an array with one column per season week
 (column j holds season week j + 1). Features describe the season as observed through season week t and are
@@ -13,31 +16,36 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from idmodels.peak.extra_features import centroids, extra_features, holiday_matrix, type_arrays
+from idmodels.peak.extra_features import centroids, extra_features, ffill, holiday_matrix, type_arrays
 
 # offset added before taking logs, in each source's units (NHSN and FluSurvNet: rate per 100k; ILINet: weighted
 # ILI x proportion positive). Roughly 1/1000 of a typical national peak for each source.
-LOG_EPS = {"nhsn": 0.01, "flusurvnet": 0.01, "ilinet": 0.001}
+# NSSP: percent of ED visits.
+LOG_EPS = {"nhsn": 0.01, "flusurvnet": 0.01, "ilinet": 0.001, "nssp": 0.01}
 
 N_SEASON_WEEKS = 53
 
-# features used by the models; KCDE_FEATURES must never be missing for rows that have a current observation
-ALL_FEATURES = [
-    "season_week",
-    "rel_max",
-    "wks_since_max",
-    "g1",
-    "g2",
-    "g3",
-    "rm3",
-    "cum_rel",
-    "hist_rel",
-    "nat_rel_max",
+# core state features, computed by state_features from the season through week t. "log" is log(value + eps), x_t is
+# the latest value (carried forward if week t is missing) and M_t the running maximum.
+CORE_FEATURES = [
+    "season_week",  # t
+    "rel_max",  # log x_t - log M_t
+    "wks_since_max",  # weeks since M_t was attained
+    "g1",  # log growth over the last week: log x_t - log x_{t-1}
+    "g2",  # log growth over the week before: log x_{t-1} - log x_{t-2}
+    "g3",  # log growth over the last 3 weeks: log x_t - log x_{t-3}
+    "rm3",  # log of the mean of the last 3 weeks - log M_t
+    "cum_rel",  # log of cumulative incidence since season week CUM_START_WEEK - log M_t
+    "hist_rel",  # log M_t - mean log peak of the location's earlier seasons of the same source
+    "nat_rel_max",  # rel_max, wks_since_max and g3 of the national series of the same source and season
     "nat_wks_since_max",
     "nat_g3",
-    "src_code",
+    "src_code",  # data source (SOURCE_CODES)
 ]
-# synchrony (other locations of the same source, season and draw) and burden-to-date features; optional in the models
+# Optional synchrony and burden-to-date features. Synchrony features summarize the other locations of the same source
+# and season (in a forecast, of the same revision draw): the median rel_max and g3, and the fractions of locations at
+# least two weeks past their running maximum and at least half of it. Burden features compare cumulative incidence to
+# date with the location's earlier seasons: with their mean season total, and with their mean through the same week.
 SYNC_BURDEN_FEATURES = [
     "sync_med_rel_max",
     "sync_med_g3",
@@ -102,13 +110,6 @@ def national_index(keys: pd.DataFrame) -> np.ndarray:
     return np.array([lookup.get((s, ssn), -1) for s, ssn in zip(keys["source"], keys["season"])], dtype=int)
 
 
-def _ffill(y: np.ndarray) -> np.ndarray:
-    """Forward fill missing values along axis 1."""
-    idx = np.where(np.isnan(y), 0, np.arange(y.shape[1]))
-    np.maximum.accumulate(idx, axis=1, out=idx)
-    return y[np.arange(y.shape[0])[:, None], idx]
-
-
 def season_peaks(y: np.ndarray, window_start: int, window_end: int) -> tuple[np.ndarray, np.ndarray]:
     """
     Peak size and peak week (first week attaining the maximum) within season weeks [window_start, window_end].
@@ -129,7 +130,7 @@ def running_max(y: np.ndarray, t: int, window_start: int) -> tuple[np.ndarray, n
     such week). Before the window opens (t < window_start), or if no in-window week is observed, M_t is the most
     recent observed value and its week is t.
     """
-    yf = _ffill(y[:, :t])
+    yf = ffill(y[:, :t])
     latest = yf[:, t - 1]
     m = latest.copy()
     m_week = np.full(y.shape[0], float(t))
@@ -170,7 +171,7 @@ def state_features(
     location) and `hist_cum` (n, N_SEASON_WEEKS: mean cumulative incidence through each week in those seasons).
     """
     n = y.shape[0]
-    yf = _ffill(y[:, :t])
+    yf = ffill(y[:, :t])
     eps = np.asarray(eps, dtype=float)
 
     def lag_log(lag):
@@ -246,7 +247,7 @@ def state_features(
     else:
         feats["cum_vs_hist_same_week"] = np.nan
 
-    # candidate groups (idmodels.peak.extra_features): trend, recession, holiday, latlon, bshare, h3
+    # optional feature groups (idmodels.peak.extra_features): trend, recession, holiday, latlon, bshare, h3
     extra = extra_features(
         y,
         t,
