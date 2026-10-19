@@ -21,6 +21,45 @@ class PoolingStrategy(str, Enum):
 
 
 @dataclass
+class NowcastConfig(ABC):
+    """
+    Abstract base for nowcast configuration (see idmodels.nowcast). A nowcast replaces the most recent, still
+    incomplete values of one source by estimates of their eventual (settled) values before a model is fit.
+    """
+
+    # the source whose most recent values are adjusted
+    source: SourceType = SourceType.NHSN
+    # number of most recent weeks adjusted for each location (1: the newest week only)
+    num_weeks: int = 1
+
+    def __post_init__(self):
+        if type(self) is NowcastConfig:
+            raise TypeError("NowcastConfig is abstract - use a specific nowcast config, e.g. ScaleByCompletenessConfig")
+
+
+@dataclass
+class ScaleByCompletenessConfig(NowcastConfig):
+    """
+    Divide each adjusted week's value by its completeness: the number of hospitals reporting that week divided by the
+    usual number (the median number reporting the weeks `typical_lags` weeks before the newest week), both as known
+    on the reference date.
+    """
+
+    # as-of archive of hospitals reporting: a csv or parquet file with columns location (FIPS code, or "US"),
+    # wk_end_date, report_date (when the value was published) and hosp_reporting. Required.
+    reporting_path: Path | None = None
+    typical_lags: tuple[int, ...] = (2, 3, 4)
+    # completeness is floored at this value, which caps the scale-up at 1 / min_completeness; it is capped at 1, so
+    # values are never scaled down
+    min_completeness: float = 0.05
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.reporting_path is None:
+            raise ValueError("ScaleByCompletenessConfig requires reporting_path")
+
+
+@dataclass
 class ModelConfig(ABC):
     """Abstract base for model configuration."""
 
@@ -28,6 +67,8 @@ class ModelConfig(ABC):
     main_source: SourceType
     fit_locations_separately: bool
     power_transform: PowerTransform
+    # optional nowcast of the most recent values, applied to the input data before the model is fit
+    nowcast: NowcastConfig | None = None
 
     def __post_init__(self):
         if type(self) is ModelConfig:

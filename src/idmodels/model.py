@@ -10,6 +10,7 @@ from iddata.sources.base import DataSource as IdDataSource
 from idmodels.config import ModelConfig, PowerTransform, RunConfig, SourceType
 from idmodels.constants import FLUSURVNET_FLOOR, FLUSURVNET_SCALE, ILINET_FLOOR, ILINET_SCALE, NHSN_FLOOR
 from idmodels.features import FeaturePipeline
+from idmodels.nowcast import build_nowcaster
 from idmodels.transforms import (
     CenterScaleTransform,
     ComposedTransform,
@@ -27,17 +28,12 @@ class IDModel(ABC):
     _build_feature_pipeline(), and _fit_and_predict(). run() orchestrates the full workflow.
     """
 
-
     def __init__(self, model_config: ModelConfig):
         self.model_config = model_config
 
-
     def run(self, run_config: RunConfig) -> None:
         """Load data, generate predictions, and save to file."""
-        sources = self._build_sources(run_config)
-        df = DiseaseDataLoader().load(sources=sources, as_of=run_config.ref_date, ancillary=[PopulationData()])
-        df = self._filter_locations(df, run_config)
-        df["unique_id"] = df["agg_level"] + df["location"]
+        df = self._load_data(run_config)
 
         transform = self._build_transform()
         df = transform.apply(df)
@@ -50,9 +46,7 @@ class IDModel(ABC):
         preds_df = self._invert_and_scale(preds_df, transform, run_config)
 
         preds_df = self._format_output(preds_df, run_config)
-        save_path = build_save_path(root=run_config.output_root,
-                                    run_config=run_config,
-                                    model_config=self.model_config)
+        save_path = build_save_path(root=run_config.output_root, run_config=run_config, model_config=self.model_config)
 
         self._raise_if_incomplete(preds_df, run_config, save_path)
 
@@ -60,18 +54,28 @@ class IDModel(ABC):
         preds_df["output_type_id"] = preds_df["output_type_id"].astype(str)
         preds_df.to_csv(save_path, index=False)
 
+    def _load_data(self, run_config: RunConfig) -> pd.DataFrame:
+        """
+        Load the data available on run_config.ref_date, apply the configured nowcast (if any) to the most recent
+        values, and keep the requested locations.
+        """
+        sources = self._build_sources(run_config)
+        df = DiseaseDataLoader().load(sources=sources, as_of=run_config.ref_date, ancillary=[PopulationData()])
+        if self.model_config.nowcast is not None:
+            df = build_nowcaster(self.model_config.nowcast).apply(df, run_config.ref_date)
+        df = self._filter_locations(df, run_config)
+        df["unique_id"] = df["agg_level"] + df["location"]
+        return df
 
     @abstractmethod
     def _build_sources(self, run_config: RunConfig) -> list[IdDataSource]:
         """Instantiate iddata DataSource objects for this model."""
         ...
 
-
     @abstractmethod
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:
         """Return the FeaturePipeline for this model."""
         ...
-
 
     @abstractmethod
     def _fit_and_predict(self, df: pd.DataFrame, feat_names: list[str], run_config: RunConfig) -> pd.DataFrame:
@@ -84,7 +88,6 @@ class IDModel(ABC):
             output_type_id, value (in inc_trans_cs space)
         """
         ...
-
 
     def _build_transform(self) -> Transform:
         """Default: ComposedTransform([SourceScaleTransform, power_transform, CenterScaleTransform()])."""
@@ -100,17 +103,12 @@ class IDModel(ABC):
             SourceType.FLUSURVNET: (FLUSURVNET_FLOOR, FLUSURVNET_SCALE),
         }
         all_sources = [self.model_config.main_source] + getattr(self.model_config, "supplementary_sources", [])
-        source_scale_params = {
-            src.value: params
-            for src, params in _SOURCE_SCALE_PARAMS.items()
-            if src in all_sources
-        }
+        source_scale_params = {src.value: params for src, params in _SOURCE_SCALE_PARAMS.items() if src in all_sources}
         if self.model_config.power_transform == PowerTransform.FOURTH_ROOT:
             power_t: Transform = FourthRootTransform()
         else:
             power_t = IdentityTransform()
         return ComposedTransform([SourceScaleTransform(source_scale_params), power_t, CenterScaleTransform()])
-
 
     def _filter_locations(self, df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:
         if not run_config.states and not run_config.hsas:
@@ -119,7 +117,6 @@ class IDModel(ABC):
         df_states = df.loc[(df["location"].isin(run_config.states)) & (df["agg_level"] != "hsa")]
         df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
         return pd.concat([df_states, df_hsas], join="inner", axis=0)
-
 
     def _invert_and_scale(self, preds_df: pd.DataFrame, transform: Transform, run_config: RunConfig) -> pd.DataFrame:
         """Inverse transform predictions then convert to original units."""
@@ -134,7 +131,6 @@ class IDModel(ABC):
 
         return preds_df
 
-
     def _format_output(self, preds_df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:
         """Reshape to FluSight hub submission format."""
         if self.model_config.main_source == SourceType.NHSN:
@@ -142,24 +138,28 @@ class IDModel(ABC):
         elif self.model_config.main_source == SourceType.NSSP:
             target_name = f"wk inc {run_config.disease.value} prop ed visits"
 
-        preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(
-            7 * preds_df["horizon"], unit="days"
-        )
+        preds_df["target_end_date"] = preds_df["wk_end_date"] + pd.to_timedelta(7 * preds_df["horizon"], unit="days")
         preds_df["reference_date"] = run_config.ref_date
         preds_df["horizon"] = (
-                pd.to_timedelta(preds_df["target_end_date"].dt.date - run_config.ref_date).dt.days / 7
+            pd.to_timedelta(preds_df["target_end_date"].dt.date - run_config.ref_date).dt.days / 7
         ).astype(int)
         preds_df["output_type"] = "quantile"
         preds_df["target"] = target_name
         preds_df.drop(columns="wk_end_date", inplace=True)
 
-        req_cols = ["location", "reference_date", "horizon", "target_end_date",
-                    "target", "output_type", "output_type_id", "value"]
+        req_cols = [
+            "location",
+            "reference_date",
+            "horizon",
+            "target_end_date",
+            "target",
+            "output_type",
+            "output_type_id",
+            "value",
+        ]
 
         # we count national as state since it is coded using the same 2-digit fips code
-        preds_df["geo_level"] = np.where(
-            preds_df["agg_level"] == "national", "state", preds_df["agg_level"]
-        )
+        preds_df["geo_level"] = np.where(preds_df["agg_level"] == "national", "state", preds_df["agg_level"])
         if len(preds_df["geo_level"].unique()) > 1:
             req_cols = ["agg_level"] + req_cols
 
@@ -167,7 +167,6 @@ class IDModel(ABC):
             ["output_type_id", "horizon", "location", "agg_level"],
             ascending=[True, True, True, False],
         ).reset_index(drop=True)[req_cols]
-
 
     def _raise_if_incomplete(self, preds_df: pd.DataFrame, run_config: RunConfig, save_path) -> None:
         """Raise if any predicted value is NaN, refusing to silently write an incomplete submission.
