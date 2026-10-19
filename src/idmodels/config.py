@@ -99,8 +99,8 @@ class GBQRModelConfig(ModelConfig):
     # for smh_model, since they're arbitrary per model and not necessarily sequential. Sampled
     # independently within each (round, location, model), so every location gets trajectories
     smh_num_otid: int | None = None
-    # seed for smh_num_otid sampling; None uses GBQR's ref_date-based seed. Sampled ids are saved under
-    # artifact_store_root/UMass-{model_name}/smh_otid/ when artifact_store_root is set
+    # seed for smh_num_otid sampling; None uses GBQR's ref_date-based seed. Sampled ids for the requested
+    # locations are saved under artifact_store_root/UMass-{model_name}/smh_otid/ when artifact_store_root is set
     smh_otid_seed: int | None = None
 
     # directional wave features (disabled by default)

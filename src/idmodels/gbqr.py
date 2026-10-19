@@ -126,12 +126,15 @@ class GBQRModel(IDModel):
 
         df_keys = self._resolve_smh_otid(df_smh, model_config, run_config)
         if model_config.smh_num_otid and run_config.artifact_store_root is not None:
-            # record the randomly sampled trajectories so a run can be traced back to them
+            # record the randomly sampled trajectories so a run can be traced back to them. Sampling covers every
+            # SMH location (so a location's sampled ids don't depend on which states were requested), but this
+            # runs before _filter_locations, so only save the keys for requested locations, matched the same way
+            # (SMH locations are state/national "syn-XX")
             save_path = build_save_path(root=run_config.artifact_store_root,
                                         run_config=run_config,
                                         model_config=model_config,
                                         subdir="smh_otid")
-            df_keys.to_csv(save_path, index=False)
+            df_keys.loc[df_keys["location"].str[-2:].isin(run_config.states)].to_csv(save_path, index=False)
         if df_keys is not None:
             df_smh = df_smh.assign(otid=_smh_otid(df_smh["season"])) \
                             .merge(df_keys, on=["round", "location", "source", "otid"], how="inner") \

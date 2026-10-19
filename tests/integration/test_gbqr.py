@@ -289,28 +289,37 @@ def test_gbqr_filter_smh_num_otid_is_reproducible_with_seed(make_run_config):
 def test_gbqr_filter_smh_num_otid_defaults_to_ref_date_seed_and_saves_ids(make_run_config):
     """
     With smh_otid_seed unset, sampling uses GBQR's ref_date-based seed, so reruns for the same
-    ref_date sample the same ids, and the sampled ids are saved to the artifact store.
+    ref_date sample the same ids. The sampled ids are saved to the artifact store, for requested
+    locations only, and a location's sampled ids don't depend on which other states were requested.
     """
-    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
     df = pd.DataFrame(_smh_otid_rows([str(i) for i in range(20)], locations=("syn-US", "syn-01")))
 
-    def sample():
+    def sample(states):
+        run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=states, hsas=[])
         model_config = create_test_gbqr_model_config(
             main_source=SourceType.NHSN, supplementary_sources=[SourceType.SMH], smh_model=["NotreDame-FRED"],
         )
         model_config.smh_num_otid = 3
         assert model_config.smh_otid_seed is None
         filtered_df = GBQRModel(model_config)._filter_smh(df.copy(), model_config, run_config)
-        return model_config, set(filtered_df["id"])
+        save_path = (run_config.artifact_store_root / f"UMass-{model_config.model_name}" / "smh_otid" /
+                     f"{run_config.ref_date}-UMass-{model_config.model_name}.csv")
+        saved = pd.read_csv(save_path, dtype={"otid": str})
+        return set(filtered_df["id"]), saved
 
-    model_config, kept_ids = sample()
-    assert sample()[1] == kept_ids
+    kept_ids, saved = sample(["US"])
+    assert sample(["US"])[0] == kept_ids
 
-    save_path = (run_config.artifact_store_root / f"UMass-{model_config.model_name}" / "smh_otid" /
-                 f"{run_config.ref_date}-UMass-{model_config.model_name}.csv")
-    saved = pd.read_csv(save_path, dtype={"otid": str})
+    # _filter_smh keeps every SMH location (_filter_locations runs later), but only requested ones are saved
     assert list(saved.columns) == ["round", "location", "source", "otid"]
-    assert {f"smh_{row.location}_{row.otid}" for row in saved.itertuples()} == kept_ids - {"surveillance"}
+    assert set(saved["location"]) == {"syn-US"}
+    kept_us_ids = {i for i in kept_ids if i.startswith("smh_syn-US_")}
+    assert {f"smh_{row.location}_{row.otid}" for row in saved.itertuples()} == kept_us_ids
+
+    # requesting another state doesn't change syn-US's sample, and adds that state's keys to the saved file
+    kept_ids_both, saved_both = sample(["US", "01"])
+    assert {i for i in kept_ids_both if i.startswith("smh_syn-US_")} == kept_us_ids
+    assert set(saved_both["location"]) == {"syn-US", "syn-01"}
 
 
 def test_gbqr_filter_smh_num_otid_raises_if_more_than_available(make_run_config):
