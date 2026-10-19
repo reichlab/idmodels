@@ -92,16 +92,12 @@ class GBQRModelConfig(ModelConfig):
 class PeakModelConfig:
     """
     Configuration shared by the direct seasonal-peak models (see idmodels.peak). These models always forecast the
-    NHSN peak; `supplementary_sources` supply additional historical seasons used only for training.
+    NHSN peak; `supplementary_sources` (ILINet and/or FluSurvNet) supply additional historical seasons used only for
+    training.
     """
 
     model_name: str
     supplementary_sources: list[SourceType] = field(default_factory=lambda: [SourceType.ILINET, SourceType.FLUSURVNET])
-    # add the synchrony and burden-to-date features (idmodels.peak.series.SYNC_BURDEN_FEATURES)
-    sync_burden_features: bool = False
-    # synchrony features count a location only if its current week was reported, instead of also counting locations
-    # whose latest value is carried forward from an earlier week
-    sync_reported_only: bool = False
     # (source, location) pairs never used for training. ILINet for Puerto Rico and the US Virgin Islands is zero for
     # whole seasons or has implausible pre-season values (sparse lab testing), so it is excluded.
     exclude_training_series: list[tuple[str, str]] = field(default_factory=lambda: [("ilinet", "72"), ("ilinet", "78")])
@@ -145,16 +141,11 @@ class PeakGBQRModelConfig(PeakModelConfig):
     bag_frac_samples: float = 0.7
     # timing classes are {already peaked, 1, ..., max_k weeks ahead, more than max_k weeks ahead}
     max_k: int = 12
-    # boost each peak-size quantile regression from the conditional-climatology baseline's quantile (LightGBM
-    # init_score) instead of the unconditional quantile. Removes implausibly wide late-season upper tails, but scored
-    # slightly worse overall in retrospective forecasts for 2023/24-2025/26, so it is off by default.
-    size_offset: bool = False
     # feature groups for the peak-size quantile regressions and the timing classifier, from "core"
-    # (idmodels.peak.series.CORE_FEATURES), "sb" (synchrony and burden, SYNC_BURDEN_FEATURES) and the groups of
-    # idmodels.peak.extra_features.FEATURE_GROUPS ("trend", "recession", "holiday", "latlon", "bshare", "h3").
-    # None: "core", plus "sb" if sync_burden_features.
-    size_feature_groups: list[str] | None = None
-    timing_feature_groups: list[str] | None = None
+    # (idmodels.peak.series.CORE_FEATURES), "sb" (synchrony and burden, SYNC_BURDEN_FEATURES) and "holiday"
+    # (idmodels.peak.extra_features.FEATURE_GROUPS)
+    size_feature_groups: list[str] = field(default_factory=lambda: ["core"])
+    timing_feature_groups: list[str] = field(default_factory=lambda: ["core"])
     # passed through to lightgbm
     n_estimators: int = 100
     learning_rate: float = 0.05

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `idmodels.peak`: direct models for the FluSight seasonal targets `peak week inc flu hosp` (pmf) and `peak inc flu hosp` (quantiles): `PeakBaselineModel` (conditional climatology) and `PeakGBQRModel` (LightGBM quantile regression + multiclass timing, bagged over seasons), configured with `PeakBaselineModelConfig` and `PeakGBQRModelConfig`
 - Season-replay training set construction from NHSN, ILINet and FluSurvNet seasons (`idmodels.peak.series`)
 - NHSN data-revision model (`idmodels.peak.revision`): block bootstrap of revision vectors estimated from NHSN vintages; peak forecasts propagate revision uncertainty by Monte Carlo so that past weeks that could be revised into the peak receive probability, and every peak-week probability is floored (`PeakModelConfig.pmf_floor`)
-- `PeakGBQRModelConfig.size_offset` (default `False`): optionally boost each peak-size quantile regression from the conditional-climatology baseline's quantile
+- Peak GBQR feature groups (`PeakGBQRModelConfig.size_feature_groups` / `timing_feature_groups`): core, synchrony and burden-to-date, and Christmas / New Year holiday-week features
 - `PeakModelConfig.drop_missing_locations` (default `False`): peak forecasts raise an error when a requested location has no current-season NHSN data, unless this is set; peak models raise an error for diseases other than influenza
 - `s3fs` is a direct dependency (used to list NHSN data vintages)
 

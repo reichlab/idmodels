@@ -8,13 +8,6 @@ Timing: a LightGBM multiclass classifier predicts the class of k = peak_week - t
 {0: already peaked, 1, ..., max_k, max_k + 1: more than max_k weeks ahead}. The last class is spread over the
 corresponding weeks in proportion to the climatological peak-week distribution.
 
-Optionally (`size_offset=True`), each quantile regression is boosted from an offset (LightGBM init_score) equal to the
-conditional-climatology baseline's quantile of z for that row, so the trees learn a correction to the baseline.
-Without the offset, boosting starts from the unconditional quantile of z, which for upper levels is dominated by very
-early-season rows (tiny running maxima, z of 7 or more); with a modest number of trees the predictions then never
-come down to z = 0 in post-peak states, giving implausibly wide upper tails late in the season. The offset fixes the
-tails but scored slightly worse overall in retrospective forecasts, so it is off by default.
-
 Both parts are bagged over training seasons: each bag is fit to a random subset of seasons, quantile predictions are
 combined by the median across bags and class probabilities by the mean.
 """
@@ -26,9 +19,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from idmodels.config import PeakBaselineModelConfig, PeakGBQRModelConfig
+from idmodels.config import PeakGBQRModelConfig
 from idmodels.peak.base import PeakModel
-from idmodels.peak.baseline import PeakBaselineModel
 from idmodels.peak.extra_features import FEATURE_GROUPS
 from idmodels.peak.series import CORE_FEATURES, SYNC_BURDEN_FEATURES
 
@@ -42,14 +34,9 @@ class PeakGBQRModel(PeakModel):
         super().__init__(model_config)
         self.model_config: PeakGBQRModelConfig = model_config
 
-    @property
-    def _features(self) -> list[str]:
-        return CORE_FEATURES + (SYNC_BURDEN_FEATURES if self.model_config.sync_burden_features else [])
-
-    def _group_features(self, groups: list[str] | None) -> list[str]:
+    @staticmethod
+    def _group_features(groups: list[str]) -> list[str]:
         """Feature columns for a list of feature groups (see PeakGBQRModelConfig.size_feature_groups)."""
-        if groups is None:
-            return self._features
         cols: list[str] = []
         for g in groups:
             cols += CORE_FEATURES if g == "core" else SYNC_BURDEN_FEATURES if g == "sb" else FEATURE_GROUPS[g]
@@ -94,96 +81,38 @@ class PeakGBQRModel(PeakModel):
         y_class = np.minimum(rows["timing_class"].to_numpy(), cfg.max_k + 1)
         seasons = rows["season"].unique()
 
-        # with size_offset, the conditional-climatology baseline's quantiles of z are the starting point (LightGBM
-        # init_score) of each quantile regression
-        self._baseline: PeakBaselineModel | None = self._fit_offset_baseline(rows) if cfg.size_offset else None
-        offset = self._size_offset(rows)
-
         self._size_models: list[list[lgb.LGBMRegressor]] = []
         self._timing_models: list[lgb.LGBMClassifier] = []
-        self.bag_seasons_: list[set] = []
         for _ in tqdm(range(cfg.num_bags), "peak_gbqr bag", disable=not cfg.progress_bar):
             bag_seasons = rng.choice(seasons, size=max(1, int(len(seasons) * cfg.bag_frac_samples)), replace=False)
-            self.bag_seasons_.append(set(bag_seasons))
             in_bag = rows["season"].isin(bag_seasons).to_numpy()
             seeds = rng.integers(1e8, size=len(self.size_levels) + 1)
             bag_models = []
             for q_ind, q_level in enumerate(self.size_levels):
                 m = lgb.LGBMRegressor(objective="quantile", alpha=q_level, **self._lgb_params(int(seeds[q_ind])))
-                # no init_score at all when the offset is off: an explicit init_score (even zeros) disables LightGBM's
-                # default of boosting from the average
-                init = offset[in_bag, q_ind] if offset is not None else None
-                m.fit(
-                    x_size.loc[in_bag],
-                    y_size[in_bag],
-                    init_score=init,
-                    categorical_feature=self._categorical(self._size_features),
-                )
+                m.fit(x_size.loc[in_bag], y_size[in_bag], categorical_feature=self._categorical(self._size_features))
                 bag_models.append(m)
             self._size_models.append(bag_models)
             clf = lgb.LGBMClassifier(objective="multiclass", **self._lgb_params(int(seeds[-1])))
             clf.fit(x_time.loc[in_bag], y_class[in_bag], categorical_feature=self._categorical(self._timing_features))
             self._timing_models.append(clf)
 
-    def _fit_offset_baseline(self, rows: pd.DataFrame) -> PeakBaselineModel:
-        cfg = self.model_config
-        baseline = PeakBaselineModel(
-            PeakBaselineModelConfig(
-                model_name=f"{cfg.model_name}_offset_baseline",
-                window_start_week=cfg.window_start_week,
-                window_end_week=cfg.window_end_week,
-                replay_start_week=cfg.replay_start_week,
-                min_window_obs=cfg.min_window_obs,
-                timing_smoothing_sd=cfg.timing_smoothing_sd,
-            )
-        )
-        # share this model's training summaries instead of recomputing them in baseline.fit()
-        baseline.hist_, baseline.clim_ = self.hist_, self.clim_
-        baseline.kmax, baseline.size_levels = self.kmax, self.size_levels
-        baseline._fit(rows)
-        return baseline
-
-    def _size_offset(self, feats: pd.DataFrame) -> np.ndarray | None:
-        """The baseline's quantiles of z for each row (n, levels), or None without size_offset."""
-        if self._baseline is None:
-            return None
-        return self._baseline._predict(feats)[1]
-
-    def oob_predict(self, rows: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Out-of-bag predictions for training rows: each row is predicted only by the bags whose training seasons exclude
-        the row's season (all bags if there are none), so the predictions are honest out-of-sample forecasts.
-        """
-        use = np.array([[s not in bag for bag in self.bag_seasons_] for s in rows["season"]])
-        use[~use.any(axis=1)] = True
-        return self._predict(rows, bag_mask=use)
-
-    def _predict(self, feats: pd.DataFrame, bag_mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
-        """bag_mask (n, num_bags): which bags to combine for each row (default all)."""
+    def _predict(self, feats: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
         cfg = self.model_config
         x_size = self._design(feats, self._size_features)
         x_time = self._design(feats, self._timing_features)
         n = len(feats)
-        if bag_mask is None:
-            bag_mask = np.ones((n, len(self._size_models)), dtype=bool)
 
-        # with the offset, predictions are corrections to it (predict() does not add init_score back)
-        offset = self._size_offset(feats)
         size_by_bag = np.stack(
             [np.column_stack([m.predict(x_size) for m in bag_models]) for bag_models in self._size_models]
         )  # (bags, n, levels)
-        if offset is not None:
-            size_by_bag = size_by_bag + offset
-        size_by_bag = np.where(bag_mask.T[:, :, None], size_by_bag, np.nan)
-        size = np.sort(np.nanmedian(size_by_bag, axis=0), axis=1)
+        size = np.sort(np.median(size_by_bag, axis=0), axis=1)
 
         n_cls = cfg.max_k + 2
         probs = np.zeros((n, n_cls))
-        for b, clf in enumerate(self._timing_models):
-            p = np.zeros((n, n_cls))
-            p[:, clf.classes_.astype(int)] = clf.predict_proba(x_time)
-            probs += p * bag_mask[:, [b]]
-        probs /= bag_mask.sum(axis=1, keepdims=True)
+        for clf in self._timing_models:
+            probs[:, clf.classes_.astype(int)] += clf.predict_proba(x_time)
+        probs /= len(self._timing_models)
 
         t = feats["season_week"].to_numpy().astype(int)
         timing = np.zeros((n, self.kmax + 1))

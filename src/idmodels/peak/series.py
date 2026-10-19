@@ -16,12 +16,11 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from idmodels.peak.extra_features import centroids, extra_features, ffill, holiday_matrix, type_arrays
+from idmodels.peak.extra_features import extra_features, ffill, holiday_matrix
 
 # offset added before taking logs, in each source's units (NHSN and FluSurvNet: rate per 100k; ILINet: weighted
 # ILI x proportion positive). Roughly 1/1000 of a typical national peak for each source.
-# NSSP: percent of ED visits.
-LOG_EPS = {"nhsn": 0.01, "flusurvnet": 0.01, "ilinet": 0.001, "nssp": 0.01}
+LOG_EPS = {"nhsn": 0.01, "flusurvnet": 0.01, "ilinet": 0.001}
 
 N_SEASON_WEEKS = 53
 
@@ -56,7 +55,7 @@ SYNC_BURDEN_FEATURES = [
 ]
 # cumulative incidence is summed from this season week on (matching `cum_rel`)
 CUM_START_WEEK = 5
-SOURCE_CODES = {"nhsn": 0, "ilinet": 1, "flusurvnet": 2, "nssp": 3}
+SOURCE_CODES = {"nhsn": 0, "ilinet": 1, "flusurvnet": 2}
 
 
 @dataclass
@@ -153,10 +152,7 @@ def state_features(
     pool: np.ndarray | None = None,
     hist_total: np.ndarray | None = None,
     hist_cum: np.ndarray | None = None,
-    sync_reported_only: bool = False,
     holiday: np.ndarray | None = None,
-    latlon: tuple[np.ndarray, np.ndarray] | None = None,
-    types: dict | None = None,
 ) -> pd.DataFrame:
     """
     Features describing each season as observed through season week t (the most recent observed week). Only
@@ -165,8 +161,8 @@ def state_features(
 
     Synchrony features (SYNC_BURDEN_FEATURES) summarize, for each row, the rows with the same `group` value (series
     of the same source and season, or of the same revision draw) that are in `pool` (non-national series) and observed
-    at t (with sync_reported_only, only if week t itself was reported; otherwise also if a value is carried forward);
-    the row itself is included if it qualifies. Burden features compare cumulative incidence to date with
+    at t (week t reported, or a value carried forward from an earlier week); the row itself is included if it
+    qualifies. Burden features compare cumulative incidence to date with
     `hist_total` (mean total incidence over weeks CUM_START_WEEK..window end in earlier seasons of the same source and
     location) and `hist_cum` (n, N_SEASON_WEEKS: mean cumulative incidence through each week in those seasons).
     """
@@ -218,8 +214,7 @@ def state_features(
     for col in SYNC_BURDEN_FEATURES[:4]:
         feats[col] = np.nan
     if group is not None:
-        observed = ~np.isnan(y[:, t - 1]) if sync_reported_only else feats["observed"].to_numpy()
-        use = np.asarray(pool if pool is not None else np.ones(n, bool)) & observed
+        use = np.asarray(pool if pool is not None else np.ones(n, bool)) & feats["observed"].to_numpy()
         d = pd.DataFrame(
             {
                 "group": np.asarray(group)[use],
@@ -247,17 +242,9 @@ def state_features(
     else:
         feats["cum_vs_hist_same_week"] = np.nan
 
-    # optional feature groups (idmodels.peak.extra_features): trend, recession, holiday, latlon, bshare, h3
+    # optional feature groups (idmodels.peak.extra_features)
     extra = extra_features(
-        y,
-        t,
-        eps,
-        window_start,
-        feats["lm"].to_numpy(),
-        feats["max_week"].to_numpy(),
-        holiday=holiday,
-        latlon=latlon,
-        types=types,
+        y, t, eps, window_start, feats["lm"].to_numpy(), feats["max_week"].to_numpy(), holiday=holiday
     )
     return pd.concat([feats, extra.set_index(feats.index)], axis=1)
 
@@ -317,8 +304,6 @@ def build_replay_rows(
     window_end: int,
     replay_start: int,
     min_window_obs: int,
-    sync_reported_only: bool = False,
-    strain: dict | None = None,
 ) -> pd.DataFrame:
     """
     Season replay: for each complete historical series and each season week t in [replay_start, window_end] with an
@@ -341,10 +326,7 @@ def build_replay_rows(
     hist_total, hist_cum = prior_mean(arrays.keys, total), prior_mean(arrays.keys, curves)
     group = pd.factorize(arrays.keys["source"] + "|" + arrays.keys["season"])[0]
     pool = (arrays.keys["agg_level"] != "national").to_numpy()
-    keys = arrays.keys
-    holiday = holiday_matrix(keys["season"])
-    latlon = centroids(keys["location"], keys["agg_level"])
-    types = type_arrays(keys["location"], keys["agg_level"], keys["season"], strain) if strain is not None else None
+    holiday = holiday_matrix(arrays.keys["season"])
 
     frames = []
     for t in range(replay_start, window_end + 1):
@@ -359,10 +341,7 @@ def build_replay_rows(
             pool=pool,
             hist_total=hist_total,
             hist_cum=hist_cum,
-            sync_reported_only=sync_reported_only,
             holiday=holiday,
-            latlon=latlon,
-            types=types,
         )
         feats = pd.concat([arrays.keys, feats], axis=1)
         feats["z"] = np.log(peak + eps) - feats["lm"]

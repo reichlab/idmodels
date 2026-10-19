@@ -86,13 +86,6 @@ def _synthetic_inputs(ref_date: datetime.date) -> PeakInputs:
     return PeakInputs(data=data, vintages=vintages)
 
 
-def _synthetic_strain(seasons) -> dict:
-    """Weekly A, B, A(H1), A(H3) positives (4, 53) for each location and the HHS regions of LOCS (Regions 4 and 10)."""
-    rng = np.random.default_rng(2)
-    geos = LOCS + ["Region 4", "Region 10"]
-    return {(g, s): rng.poisson(30, (4, 53)).astype(float) for g in geos for s in seasons}
-
-
 def _run_config(ref_date, tmp_path, disease=Disease.FLU, states=LOCS):
     return RunConfig(
         disease=disease,
@@ -231,35 +224,13 @@ class TestRevision:
         ),
         PeakGBQRModel(
             PeakGBQRModelConfig(
-                model_name="peak_gbqr_offset",
-                supplementary_sources=[SourceType.ILINET],
-                num_revision_draws=20,
-                num_bags=2,
-                n_estimators=10,
-                size_offset=True,
-            )
-        ),
-        PeakGBQRModel(
-            PeakGBQRModelConfig(
                 model_name="peak_gbqr",
                 supplementary_sources=[SourceType.ILINET],
                 num_revision_draws=20,
                 num_bags=2,
                 n_estimators=10,
-                sync_burden_features=True,
-            )
-        ),
-        PeakGBQRModel(
-            PeakGBQRModelConfig(
-                model_name="peak_gbqr",
-                supplementary_sources=[SourceType.ILINET],
-                num_revision_draws=20,
-                num_bags=2,
-                n_estimators=10,
-                sync_reported_only=True,
-                size_offset=True,
-                size_feature_groups=["core", "sb", "trend", "bshare"],
-                timing_feature_groups=["core", "recession", "latlon", "holiday", "h3"],
+                size_feature_groups=["core", "sb"],
+                timing_feature_groups=["core", "holiday"],
             )
         ),
     ],
@@ -268,13 +239,6 @@ def test_forecast_is_valid_submission(model, tmp_path):
     ref_date = datetime.date(2026, 12, 19)  # season week 21, before the synthetic current-season peak
     run_config = _run_config(ref_date, tmp_path)
     inputs = _synthetic_inputs(ref_date)
-    cfg = model.model_config
-    groups = set(getattr(cfg, "size_feature_groups", None) or []) | set(
-        getattr(cfg, "timing_feature_groups", None) or []
-    )
-    if {"bshare", "h3"} & groups:
-        # the type/subtype features need type/subtype counts
-        inputs.strain = _synthetic_strain(inputs.data["season"].unique())
     df = model.forecast(inputs, run_config)
 
     pmf = df.loc[df["output_type"] == "pmf"]
@@ -298,46 +262,20 @@ def test_forecast_is_valid_submission(model, tmp_path):
     pd.testing.assert_frame_equal(df, model.forecast(inputs, run_config))
 
 
-def test_gbqr_oob_predictions_exclude_own_season(tmp_path):
-    ref_date = datetime.date(2026, 12, 19)
-    model = PeakGBQRModel(
-        PeakGBQRModelConfig(
-            model_name="g", supplementary_sources=[SourceType.ILINET], num_bags=4, n_estimators=10, progress_bar=False
-        )
-    )
-    model.forecast(_synthetic_inputs(ref_date), _run_config(ref_date, tmp_path))
-    rows = model.train_rows_
-    timing, size = model.oob_predict(rows)
-    # raw GBQR timing may sum to < 1 where tail classes fall outside the window (renormalized downstream)
-    assert timing.shape == (len(rows), model.kmax + 1) and np.all(timing.sum(axis=1) <= 1 + 1e-9)
-    assert np.all(np.diff(size, axis=1) >= 0)
-    # a season in only some bags is predicted by the others only
-    season = rows["season"].iloc[0]
-    use = np.array([season not in b for b in model.bag_seasons_])
-    if use.any() and not use.all():
-        sel = rows["season"] == season
-        t_oob, _ = model._predict(rows.loc[sel], bag_mask=np.tile(use, (sel.sum(), 1)))
-        assert np.allclose(t_oob, timing[sel.to_numpy()])
-
-
 def test_extra_features_do_not_look_ahead():
     from idmodels.peak.extra_features import FEATURE_GROUPS, holiday_matrix
 
     rng = np.random.default_rng(0)
     n = 3
     y = np.stack([_curve(20 + i, 5.0 + i) for i in range(n)]) * rng.lognormal(0, 0.05, (n, 53))
-    types = {k: rng.poisson(30, (n, 53)).astype(float) for k in ["A", "B", "H1", "H3", "H1n", "H3n"]}
-    kw = dict(holiday=holiday_matrix(["2018/19"] * n), latlon=(np.array([40.0, 35.0, np.nan]), np.zeros(n)))
-    f1 = state_features(y, 24, np.full(n, 0.01), 10, types=types, **kw)
-    y2, types2 = y.copy(), {k: v.copy() for k, v in types.items()}
+    holiday = holiday_matrix(["2018/19"] * n)
+    f1 = state_features(y, 24, np.full(n, 0.01), 10, holiday=holiday)
+    y2 = y.copy()
     y2[:, 24:] = y2[:, 24:] * 100 + 5
-    for v in types2.values():
-        v[:, 24:] = v[:, 24:] * 100 + 5
-    f2 = state_features(y2, 24, np.full(n, 0.01), 10, types=types2, **kw)
+    f2 = state_features(y2, 24, np.full(n, 0.01), 10, holiday=holiday)
     pd.testing.assert_frame_equal(f1, f2)
     for cols in FEATURE_GROUPS.values():
-        assert set(cols) <= set(f1.columns)
-    assert f1["b_share_3wk"].notna().all() and f1["lat"].isna().sum() == 1
+        assert set(cols) <= set(f1.columns) and f1[cols].notna().all().all()
 
 
 def test_gbqr_size_and_timing_features_are_independent(tmp_path):
@@ -359,8 +297,8 @@ def test_gbqr_size_and_timing_features_are_independent(tmp_path):
         return PeakGBQRModel(cfg).forecast(_synthetic_inputs(ref_date), run_config)
 
     a = forecast(["core", "sb"], ["core"])
-    b = forecast(["core", "sb"], ["core", "recession", "latlon"])
-    c = forecast(["core", "trend"], ["core"])
+    b = forecast(["core", "sb"], ["core", "holiday"])
+    c = forecast(["core", "holiday"], ["core"])
     size, pmf = a["target"] == "peak inc flu hosp", a["output_type"] == "pmf"
     assert np.array_equal(a.loc[size, "value"], b.loc[size, "value"])
     assert np.allclose(a.loc[pmf, "value"], c.loc[pmf, "value"])
@@ -371,28 +309,6 @@ def _baseline_model(**kwargs):
         model_name="peak_baseline", supplementary_sources=[SourceType.ILINET], num_revision_draws=20, **kwargs
     )
     return PeakBaselineModel(cfg)
-
-
-def test_type_subtype_features_use_strain(tmp_path):
-    ref_date = datetime.date(2026, 12, 19)
-    inputs = _synthetic_inputs(ref_date)
-    inputs.strain = _synthetic_strain(inputs.data["season"].unique())
-    model = PeakGBQRModel(
-        PeakGBQRModelConfig(
-            model_name="g",
-            supplementary_sources=[SourceType.ILINET],
-            num_revision_draws=20,
-            num_bags=2,
-            n_estimators=10,
-            progress_bar=False,
-            size_feature_groups=["core", "bshare"],
-            timing_feature_groups=["core", "h3"],
-        )
-    )
-    model.forecast(inputs, _run_config(ref_date, tmp_path))
-    rows = model.train_rows_
-    assert rows["b_share_3wk"].notna().any()
-    assert rows.filter(like="h3").notna().any().any()
 
 
 def test_non_flu_disease_is_rejected(tmp_path):
