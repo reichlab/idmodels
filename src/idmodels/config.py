@@ -105,8 +105,9 @@ class PeakModelConfig:
     # (source, location) pairs never used for training. ILINet for Puerto Rico and the US Virgin Islands is zero for
     # whole seasons or has implausible pre-season values (sparse lab testing), so it is excluded.
     exclude_training_series: list[tuple[str, str]] = field(default_factory=lambda: [("ilinet", "72"), ("ilinet", "78")])
-    # season weeks (1 = MMWR week 31) bounding the window in which the peak is defined. 10 and 43 correspond to the
-    # FluSight 2026/27 peak-week dates (2026-10-10 through 2027-05-29)
+    # season weeks (1 = MMWR week 31) bounding the window in which the peak is defined. The FluSight window is the 34
+    # weeks starting MMWR week 40, which is always season weeks 10-43 (e.g. 2025-10-04 through 2026-05-23 for 2025/26
+    # and 2026-10-10 through 2027-05-29 for 2026/27), so these do not need to change from season to season
     window_start_week: int = 10
     window_end_week: int = 43
     # earliest season week of the most recent observation for which training rows are built
@@ -116,6 +117,9 @@ class PeakModelConfig:
     # data revision (backfill) Monte Carlo
     num_revision_draws: int = 200
     revision_max_lag: int = 10
+    # if False, raise an error when a requested location has no current-season NHSN data or population; if True,
+    # omit such locations from the forecast with a warning (an error is still raised if no location has data)
+    drop_missing_locations: bool = False
     # floor applied to every peak-week probability before renormalizing; guarantees a finite log score
     pmf_floor: float = 1e-4
     # standard deviation (in weeks) of the Gaussian kernel used to smooth the climatological peak-week distribution

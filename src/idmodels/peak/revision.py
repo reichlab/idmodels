@@ -10,6 +10,17 @@ vintage available ("final"), and 1 is added to keep zero counts defined. A revis
 mature. New revision draws are produced by resampling whole vectors (a block bootstrap), which keeps the dependence
 between revisions at different lags within a single release. Vectors are grouped into strata by the size of the
 reported lag-0 count, because small counts are revised proportionally more.
+
+Pooling of reporting systems. The vintages come from two reporting systems: HHS (released before 2024-11-15) and NHSN
+(from 2024-11-15 on), and all vectors are pooled with equal weight. Their revisions differ: in vintages through
+2026-10-17, the median lag-0 revision is about 0 for HHS vintages and about +0.055 (counts later revised up by about
+5-6%) for NHSN vintages, with lag-0 SDs of about 0.13 and 0.28. Pooling therefore understates both the expected upward
+revision and the spread of the newest weeks under NHSN reporting. The HHS share of the pool falls every season (about
+a quarter of the vectors for 2026/27). Alternatives that were considered are dropping HHS vintages once there are
+enough NHSN vectors, or weighting vectors by recency; this choice may change.
+
+Weeks at lag max_lag or more are taken as final, although they are still revised somewhat (the SD of the lag-9
+revision is about 0.1).
 """
 
 import datetime
@@ -19,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
+import s3fs
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +38,14 @@ _NHSN_PATTERNS = [
     "infectious-disease-data/data-raw/influenza-hhs/hhs-????-??-??.csv",
     "infectious-disease-data/data-raw/influenza-nhsn/nhsn-????-??-??.csv",
 ]
+# NHSN vintages by release date (None: the vintage could not be read), kept for the life of the process so that a loop
+# over reference dates downloads each vintage only once. It is not bounded, but grows only with the number of vintages
+# (about one per week).
 _VINTAGE_CACHE: dict[datetime.date, pd.DataFrame | None] = {}
 
 
 def list_nhsn_vintage_dates(as_of: datetime.date) -> list[datetime.date]:
     """Dates of all NHSN (and pre-2024-11-15 HHS) snapshots released on or before as_of."""
-    import s3fs
-
     fs = s3fs.S3FileSystem(anon=True)
     dates = []
     for pattern in _NHSN_PATTERNS:
@@ -74,7 +87,10 @@ def load_nhsn_vintages(as_of: datetime.date, max_workers: int = 8) -> pd.DataFra
 
 
 class RevisionModel:
-    """Block-bootstrap model for the log revision ratios of the most recent `max_lag` weeks."""
+    """
+    Block-bootstrap model for the log revision ratios of the most recent `max_lag` weeks. All vintages passed to fit()
+    are pooled with equal weight, including HHS-era ones (see the module docstring).
+    """
 
     def __init__(
         self,

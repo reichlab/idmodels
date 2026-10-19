@@ -201,7 +201,7 @@ def get_directional_neighbors(
     """
     if direction not in DIRECTION_ANGLES:
         raise ValueError(
-            f"Invalid direction '{direction}'. " f"Must be one of: {', '.join(sorted(DIRECTION_ANGLES.keys()))}"
+            f"Invalid direction '{direction}'. Must be one of: {', '.join(sorted(DIRECTION_ANGLES.keys()))}"
         )
 
     direction_angle = DIRECTION_ANGLES[direction]
@@ -262,9 +262,7 @@ def validate_wave_directions(wave_directions: List[str]) -> None:
     # Check for invalid directions
     for direction in wave_directions:
         if direction not in valid_directions:
-            raise ValueError(
-                f"Invalid direction '{direction}'. " f"Must be one of: {', '.join(sorted(valid_directions))}"
-            )
+            raise ValueError(f"Invalid direction '{direction}'. Must be one of: {', '.join(sorted(valid_directions))}")
 
     # Check for opposite direction pairs (potential multicollinearity warning)
     opposite_pairs = [("N", "S"), ("E", "W"), ("NE", "SW"), ("NW", "SE")]

@@ -1,4 +1,5 @@
 import datetime
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -85,14 +86,21 @@ def _synthetic_inputs(ref_date: datetime.date) -> PeakInputs:
     return PeakInputs(data=data, vintages=vintages)
 
 
-def _run_config(ref_date, tmp_path):
+def _synthetic_strain(seasons) -> dict:
+    """Weekly A, B, A(H1), A(H3) positives (4, 53) for each location and the HHS regions of LOCS (Regions 4 and 10)."""
+    rng = np.random.default_rng(2)
+    geos = LOCS + ["Region 4", "Region 10"]
+    return {(g, s): rng.poisson(30, (4, 53)).astype(float) for g in geos for s in seasons}
+
+
+def _run_config(ref_date, tmp_path, disease=Disease.FLU, states=LOCS):
     return RunConfig(
-        disease=Disease.FLU,
+        disease=disease,
         ref_date=ref_date,
         output_root=tmp_path,
         artifact_store_root=None,
         max_horizon=4,
-        states=LOCS,
+        states=states,
         hsas=[],
         q_levels=Q_LEVELS,
         q_labels=[str(q) for q in Q_LEVELS],
@@ -104,6 +112,19 @@ class TestSeriesHelpers:
         assert season_week_to_date("2026/27", 10) == datetime.date(2026, 10, 10)
         assert season_week_to_date("2026/27", 43) == datetime.date(2027, 5, 29)
         assert season_of(datetime.date(2026, 10, 10)) == "2026/27"
+
+    def test_default_window_matches_flusight_every_season(self):
+        # FluSight's peak-week dates for each season; the default window (season weeks 10-43) gives them all
+        cfg = PeakBaselineModelConfig(model_name="b")
+        flusight = {
+            "2023/24": ("2023-10-07", "2024-05-25"),
+            "2024/25": ("2024-10-05", "2025-05-24"),
+            "2025/26": ("2025-10-04", "2026-05-23"),
+            "2026/27": ("2026-10-10", "2027-05-29"),
+        }
+        for season, (start, end) in flusight.items():
+            assert str(season_week_to_date(season, cfg.window_start_week)) == start
+            assert str(season_week_to_date(season, cfg.window_end_week)) == end
 
     def test_peaks_and_running_max(self):
         y = np.full((1, 53), np.nan)
@@ -246,7 +267,15 @@ class TestRevision:
 def test_forecast_is_valid_submission(model, tmp_path):
     ref_date = datetime.date(2026, 12, 19)  # season week 21, before the synthetic current-season peak
     run_config = _run_config(ref_date, tmp_path)
-    df = model.forecast(_synthetic_inputs(ref_date), run_config)
+    inputs = _synthetic_inputs(ref_date)
+    cfg = model.model_config
+    groups = set(getattr(cfg, "size_feature_groups", None) or []) | set(
+        getattr(cfg, "timing_feature_groups", None) or []
+    )
+    if {"bshare", "h3"} & groups:
+        # the type/subtype features need type/subtype counts
+        inputs.strain = _synthetic_strain(inputs.data["season"].unique())
+    df = model.forecast(inputs, run_config)
 
     pmf = df.loc[df["output_type"] == "pmf"]
     assert set(pmf["target"]) == {"peak week inc flu hosp"}
@@ -266,7 +295,7 @@ def test_forecast_is_valid_submission(model, tmp_path):
     assert df["horizon"].isna().all() and df["target_end_date"].isna().all()
 
     # deterministic given the reference date
-    pd.testing.assert_frame_equal(df, model.forecast(_synthetic_inputs(ref_date), run_config))
+    pd.testing.assert_frame_equal(df, model.forecast(inputs, run_config))
 
 
 def test_gbqr_oob_predictions_exclude_own_season(tmp_path):
@@ -335,3 +364,69 @@ def test_gbqr_size_and_timing_features_are_independent(tmp_path):
     size, pmf = a["target"] == "peak inc flu hosp", a["output_type"] == "pmf"
     assert np.array_equal(a.loc[size, "value"], b.loc[size, "value"])
     assert np.allclose(a.loc[pmf, "value"], c.loc[pmf, "value"])
+
+
+def _baseline_model(**kwargs):
+    cfg = PeakBaselineModelConfig(
+        model_name="peak_baseline", supplementary_sources=[SourceType.ILINET], num_revision_draws=20, **kwargs
+    )
+    return PeakBaselineModel(cfg)
+
+
+def test_type_subtype_features_use_strain(tmp_path):
+    ref_date = datetime.date(2026, 12, 19)
+    inputs = _synthetic_inputs(ref_date)
+    inputs.strain = _synthetic_strain(inputs.data["season"].unique())
+    model = PeakGBQRModel(
+        PeakGBQRModelConfig(
+            model_name="g",
+            supplementary_sources=[SourceType.ILINET],
+            num_revision_draws=20,
+            num_bags=2,
+            n_estimators=10,
+            progress_bar=False,
+            size_feature_groups=["core", "bshare"],
+            timing_feature_groups=["core", "h3"],
+        )
+    )
+    model.forecast(inputs, _run_config(ref_date, tmp_path))
+    rows = model.train_rows_
+    assert rows["b_share_3wk"].notna().any()
+    assert rows.filter(like="h3").notna().any().any()
+
+
+def test_non_flu_disease_is_rejected(tmp_path):
+    ref_date = datetime.date(2026, 12, 19)
+    with pytest.raises(ValueError, match="only influenza"):
+        _baseline_model().forecast(_synthetic_inputs(ref_date), _run_config(ref_date, tmp_path, disease=Disease.RSV))
+
+
+def test_locations_without_data(tmp_path):
+    ref_date = datetime.date(2026, 12, 19)
+    inputs = _synthetic_inputs(ref_date)
+    # by default, a requested location without current-season data is an error
+    with pytest.raises(ValueError, match=r"locations \['06'\]"):
+        _baseline_model().forecast(inputs, _run_config(ref_date, tmp_path, states=LOCS + ["06"]))
+    # with drop_missing_locations, it is omitted with a warning
+    with pytest.warns(UserWarning, match="omitting them"):
+        df = _baseline_model(drop_missing_locations=True).forecast(
+            inputs, _run_config(ref_date, tmp_path, states=LOCS + ["06"])
+        )
+    assert set(df["location"]) == set(LOCS)
+    # if no requested location has data, it is an error either way
+    with pytest.raises(ValueError, match=r"locations \['06'\]"):
+        _baseline_model(drop_missing_locations=True).forecast(inputs, _run_config(ref_date, tmp_path, states=["06"]))
+
+
+def test_reusing_fit_with_different_data_warns(tmp_path):
+    ref_date = datetime.date(2026, 12, 19)
+    inputs = _synthetic_inputs(ref_date)
+    model = _baseline_model()
+    model.forecast(inputs, _run_config(ref_date, tmp_path))
+    # the same training series (e.g. the next reference date's data): the fit is reused without a warning
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        model.fit(inputs.data, "2026/27", Q_LEVELS)
+    # different training series: the fit is still reused, with a warning
+    with pytest.warns(UserWarning, match="reusing the fit"):
+        model.fit(inputs.data.loc[inputs.data["location"] != "02"], "2026/27", Q_LEVELS)

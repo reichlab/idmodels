@@ -20,11 +20,13 @@ import calendar
 import datetime
 import warnings
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 from iddata.ancillary.population import PopulationData
+from iddata.enums import Disease
 from iddata.loader import DiseaseDataLoader
 from iddata.sources.flusurvnet import FluSurvNetDataSource
 from iddata.sources.ilinet import ILINetDataSource
@@ -51,7 +53,10 @@ from idmodels.utils import build_save_path
 PEAK_WEEK_TARGET = "peak week inc {disease} hosp"
 PEAK_SIZE_TARGET = "peak inc {disease} hosp"
 
-_DATA_CACHE: dict[tuple, pd.DataFrame] = {}
+# input data loaded by load_inputs(), keyed by (sources, reference date). Bounded so that a long loop over reference
+# dates does not keep every date's data in memory; only the most recently used entries are kept.
+_DATA_CACHE: OrderedDict[tuple, pd.DataFrame] = OrderedDict()
+_DATA_CACHE_SIZE = 4
 
 
 @dataclass
@@ -70,12 +75,17 @@ class PeakModel(ABC):
     def __init__(self, model_config: PeakModelConfig):
         self.model_config = model_config
         self._fitted_key: tuple | None = None
+        self._fitted_series: frozenset = frozenset()
 
     # ---------------------------------------------------------------------------------------------------------------
     # public entry points
 
     def run(self, run_config: RunConfig) -> pd.DataFrame:
-        """Load data available on run_config.ref_date, forecast, and save a hub-formatted csv. Returns the forecast."""
+        """
+        Load data available on run_config.ref_date, forecast, and save a hub-formatted csv. Returns the forecast.
+        Peak models use run_config's disease, ref_date, output_root, states (the locations to forecast), q_levels and
+        q_labels; artifact_store_root, max_horizon and hsas are ignored.
+        """
         inputs = self.load_inputs(run_config.ref_date)
         preds_df = self.forecast(inputs, run_config)
         save_path = build_save_path(root=run_config.output_root, run_config=run_config, model_config=self.model_config)
@@ -85,7 +95,9 @@ class PeakModel(ABC):
     def load_inputs(self, ref_date: datetime.date) -> PeakInputs:
         sources = [SourceType.NHSN] + list(self.model_config.supplementary_sources)
         key = (tuple(s.value for s in sources), ref_date)
-        if key not in _DATA_CACHE:
+        if key in _DATA_CACHE:
+            _DATA_CACHE.move_to_end(key)
+        else:
             # NSSP is loaded separately below
             source_map = {
                 SourceType.NHSN: NHSNDataSource(),
@@ -102,6 +114,8 @@ class PeakModel(ABC):
                 if SourceType.NSSP in sources:
                     data = pd.concat([data, self._load_nssp(ref_date)], ignore_index=True)
             _DATA_CACHE[key] = data
+            while len(_DATA_CACHE) > _DATA_CACHE_SIZE:
+                _DATA_CACHE.popitem(last=False)
         return PeakInputs(data=_DATA_CACHE[key], vintages=load_nhsn_vintages(ref_date))
 
     @staticmethod
@@ -119,6 +133,9 @@ class PeakModel(ABC):
 
     def forecast(self, inputs: PeakInputs, run_config: RunConfig) -> pd.DataFrame:
         """Hub-formatted peak week pmf and peak size quantile forecasts for run_config.ref_date."""
+        # the data loaded by load_inputs() and the revision model's vintages are influenza-only
+        if run_config.disease != Disease.FLU:
+            raise ValueError(f"peak models support only influenza, not {Disease(run_config.disease).value!r}")
         season = season_of(run_config.ref_date)
         self.fit(inputs.data, season, run_config.q_levels, strain=inputs.strain)
         rng = np.random.default_rng(int(calendar.timegm(run_config.ref_date.timetuple())))
@@ -152,20 +169,28 @@ class PeakModel(ABC):
         """
         Fit to all seasons of `data` (long-format iddata output, any sources) strictly before `season`. The fit only
         changes when the season does (up to minor revisions to earlier seasons' data), so it is repeated only when
-        the season, the quantile levels or whether `strain` is supplied changes. `strain` (optional) maps (geography,
-        season) to weekly A, B, A(H1), A(H3) positives for the type/subtype features
-        (idmodels.peak.extra_features.type_arrays).
+        the season, the quantile levels or whether `strain` is supplied changes. To fit the same configuration to
+        different data in the same season, use a new model object. `strain` (optional) maps (geography, season) to
+        weekly A, B, A(H1), A(H3) positives for the type/subtype features (idmodels.peak.extra_features.type_arrays).
         """
         cfg = self.model_config
         self.size_levels = np.asarray(q_levels, dtype=float)
         self.kmax = cfg.window_end_week - 1
         key = (season, tuple(self.size_levels), strain is not None)
-        if self._fitted_key == key:
-            return
         train = data.loc[data["season"] < season]
         excluded = pd.MultiIndex.from_tuples(cfg.exclude_training_series) if cfg.exclude_training_series else None
         if excluded is not None:
             train = train.loc[~pd.MultiIndex.from_arrays([train["source"], train["location"]]).isin(excluded)]
+        # the training series (source, location, season): unchanged by revisions to earlier seasons' values, but
+        # different if `data` has other sources, locations or seasons than the data of the existing fit
+        series = frozenset(train[["source", "location", "season"]].drop_duplicates().itertuples(index=False, name=None))
+        if self._fitted_key == key:
+            if series != self._fitted_series:
+                warnings.warn(
+                    f"reusing the fit for season {season}, although `data` has different training series than the "
+                    "data it was fit to; use a new model object to fit to these data"
+                )
+            return
         arrays = build_season_arrays(train)
         self.hist_ = historical_log_peaks(arrays, cfg.window_start_week, cfg.window_end_week, cfg.min_window_obs)
         # mean season total and cumulative curve per (source, location) over the complete training series
@@ -194,6 +219,7 @@ class PeakModel(ABC):
         self.train_rows_ = rows
         self._fit(rows)
         self._fitted_key = key
+        self._fitted_series = series
 
     def _spread_climatology(self, t: np.ndarray, first_k: int) -> np.ndarray:
         """
@@ -245,7 +271,10 @@ class PeakModel(ABC):
         has_data = ~np.all(np.isnan(counts), axis=1) & ~np.isnan(pop)
         if not has_data.all():
             dropped = [loc for loc, ok in zip(locations, has_data) if not ok]
-            warnings.warn(f"no current-season data or population for {dropped}; omitting them")
+            msg = f"no current-season NHSN data or population on {run_config.ref_date} for locations {dropped}"
+            if not cfg.drop_missing_locations or not has_data.any():
+                raise ValueError(msg)
+            warnings.warn(f"{msg}; omitting them")
         locations = [loc for loc, ok in zip(locations, has_data) if ok]
         counts, pop = counts[has_data], pop[has_data]
         n_loc, n_draws = len(locations), cfg.num_revision_draws
