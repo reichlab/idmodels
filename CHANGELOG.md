@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `joblib` dependency
 
 ### Changed
-- **Breaking** (forecast output): GBQR features for flu/RSV are now grouped by `(source, location, season)` instead of `(source, location)`, for every run, not only SMH ones. Lags, rolling means, Taylor features, and horizon targets no longer bridge gaps between seasons. This fixes FluSurvNet (which only reports season weeks ~10-40) taking early-season lags from the previous April and late-season horizon targets from the following October. It also keeps SMH trajectories separate. For year-round sources, only training rows at season weeks 5-7 change
+- **Breaking** (forecast output): GBQR features for flu/RSV are now grouped by `(source, location, season)` instead of `(source, location)`, for every run, not only SMH ones. Lags, rolling means, Taylor features, and horizon targets no longer bridge gaps between seasons. This fixes FluSurvNet (which only reports season weeks ~10-40) taking early-season lags from the previous April and late-season horizon targets from the following October. It also keeps SMH trajectories separate. For year-round sources, only training rows at season weeks 5-8 change
 - GBQR bag × quantile model fits now run in parallel with `joblib` (threads), with results still deterministic
 - `RollingMeanFeature` now honors its `group_columns` argument (previously overridden), and its default is `["source", "location"]` to match the other features
 - `IDModel._filter_locations()` matches requested states on the last two characters of `location`, restricted to state/national rows, so SMH's synthetic `syn-XX` locations are kept

@@ -186,10 +186,11 @@ class GBQRModel(IDModel):
             #   encodes scenario + output_type_id), so without season they would be treated as one
             #   interleaved series.
             # For sources reported year-round (NHSN, most ILINet), the cost is small: the longest
-            # lookback is 7 weeks (6-week Taylor window lagged by 2), so only training rows at season
-            # weeks 5-7 lose inputs from the previous season's late-July weeks. Horizon targets for
+            # lookback is 8 weeks (the 6-week Taylor window lagged by 2; timeseriesutils' trailing Taylor
+            # fit only starts one row after the first full window), so only training rows at season
+            # weeks 5-8 lose inputs from the previous season's late-July weeks. Horizon targets for
             # in-season rows (week <= 45) don't reach past season week 52 for max_horizon <= 7, and
-            # forecast dates are well past week 7.
+            # forecast dates are well past week 8.
             group_cols = ["source", "location", "season"]
         else:
             initial_feats = ["inc_trans_cs", "log_pop"]
