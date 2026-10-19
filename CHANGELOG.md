@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.2.0]
+## [2.2.0] - 2026-10-19
 
 ### Added
 - Scenario Modeling Hub (SMH) trajectory data as a GBQR training source (`SourceType.SMH`, flu only), via iddata's `SMHDataSource`
