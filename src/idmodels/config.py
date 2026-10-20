@@ -27,6 +27,16 @@ class PoolingStrategy(str, Enum):
     SHARED = "shared"
 
 
+class SampleIdScheme(str, Enum):
+    """How sample output_type_ids are labeled; each sample is one draw for one location."""
+
+    # "{state abbreviation}{2-digit 0-based index}", e.g. "US00", "AL99". States/national only, at most 100 samples
+    STATE_ABBREVIATION = "state_abbreviation"
+    # "{1-based index}" with no padding, e.g. "1", "100", for any location. Not unique across locations on its own:
+    # a downstream step is expected to prepend a per-location prefix
+    DRAW_NUMBER = "draw_number"
+
+
 @dataclass
 class ModelConfig(ABC):
     """Abstract base for model configuration."""
@@ -43,7 +53,7 @@ class ModelConfig(ABC):
 
 @dataclass
 class RunConfig:
-    """Run configuration: disease, locations, output paths, quantile levels."""
+    """Run configuration: disease, locations, output paths, quantile levels, sample output."""
 
     disease: Disease
     ref_date: datetime.date
@@ -54,6 +64,22 @@ class RunConfig:
     hsas: list[str]
     q_levels: list[float]
     q_labels: list[str]
+    # number of sample trajectories to output per location, in addition to quantiles; 0 disables sample output
+    num_sample_forecasts: int = 0
+    sample_id_scheme: SampleIdScheme = SampleIdScheme.STATE_ABBREVIATION
+
+
+    def __post_init__(self):
+        if self.num_sample_forecasts < 0:
+            raise ValueError(f"num_sample_forecasts must be at least 0, got {self.num_sample_forecasts}.")
+        if self.num_sample_forecasts > 0 and self.sample_id_scheme == SampleIdScheme.STATE_ABBREVIATION:
+            # the 2-digit suffix only supports indices 00-99
+            if self.num_sample_forecasts > 100:
+                raise ValueError(f"num_sample_forecasts must be at most 100 with sample_id_scheme="
+                                 f"{self.sample_id_scheme.value}, got {self.num_sample_forecasts}.")
+            if self.hsas:
+                raise ValueError(f"sample_id_scheme={self.sample_id_scheme.value} only supports states and national; "
+                                 f"use {SampleIdScheme.DRAW_NUMBER.value} to output samples for HSAs.")
 
 
 @dataclass
