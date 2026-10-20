@@ -144,8 +144,6 @@ def test_contract_is_enforced():
 def test_config_validation_and_factory(tmp_path):
     with pytest.raises(TypeError, match="abstract"):
         NowcastConfig()
-    with pytest.raises(ValueError, match="reporting_path"):
-        ScaleByCompletenessConfig()
     assert isinstance(
         build_nowcaster(ScaleByCompletenessConfig(reporting_path=tmp_path / "x.csv")), ScaleByCompletenessNowcaster
     )
@@ -176,3 +174,16 @@ def test_idmodel_applies_nowcast_to_loaded_data(tmp_path, with_nowcast):
     # without a nowcast the loaded data are used as they are
     assert _inc(df, "nhsn", "01") == (16.0 if with_nowcast else 8.0)
     assert _inc(df, "nhsn", "02") == 8.0
+
+
+def test_reads_delphi_archive_without_reporting_path(tmp_path):
+    archive = pd.read_csv(
+        _reporting(
+            tmp_path, [{"location": "01", "wk_end_date": NEWEST, "report_date": "2026-01-13", "hosp_reporting": 50}]
+        ),
+        dtype={"location": str},
+    )
+    with patch("idmodels.nowcast.completeness.nhsn_hosp_reporting_archive", return_value=archive) as delphi:
+        out = ScaleByCompletenessNowcaster(ScaleByCompletenessConfig()).apply(_data(), AS_OF)
+    delphi.assert_called_once()
+    assert _inc(out, "nhsn", "01") == pytest.approx(16.0)

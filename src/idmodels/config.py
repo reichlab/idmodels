@@ -46,17 +46,13 @@ class ScaleByCompletenessConfig(NowcastConfig):
     """
 
     # as-of archive of hospitals reporting: a csv or parquet file with columns location (FIPS code, or "US"),
-    # wk_end_date, report_date (when the value was published) and hosp_reporting. Required.
+    # wk_end_date, report_date (when the value was published) and hosp_reporting. None (the default) reads the
+    # NHSN counts from the Delphi Epidata archive.
     reporting_path: Path | None = None
     typical_lags: tuple[int, ...] = (2, 3, 4)
     # completeness is floored at this value, which caps the scale-up at 1 / min_completeness; it is capped at 1, so
     # values are never scaled down
     min_completeness: float = 0.05
-
-    def __post_init__(self):
-        super().__post_init__()
-        if self.reporting_path is None:
-            raise ValueError("ScaleByCompletenessConfig requires reporting_path")
 
 
 @dataclass

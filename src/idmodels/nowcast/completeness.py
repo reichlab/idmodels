@@ -7,16 +7,22 @@ import pandas as pd
 
 from idmodels.config import ScaleByCompletenessConfig
 from idmodels.nowcast.base import Nowcaster
+from idmodels.nowcast.delphi import nhsn_hosp_reporting_archive
 
 
-def load_reporting(path: Path, as_of: datetime.date) -> pd.DataFrame:
+def load_reporting(path: Path | None, as_of: datetime.date) -> pd.DataFrame:
     """
-    Number of hospitals reporting each week, as known on `as_of`, from an as-of archive (csv or parquet with columns
-    location, wk_end_date, report_date, hosp_reporting; one row per published value). Returns columns location,
-    wk_end_date, hosp_reporting: for each location and week, the latest value published on or before `as_of`.
+    Number of hospitals reporting each week, as known on `as_of`, from an as-of archive (one row per published value,
+    with columns location, wk_end_date, report_date, hosp_reporting): a csv or parquet file at `path`, or the Delphi
+    Epidata archive of NHSN counts if `path` is None. Returns columns location, wk_end_date, hosp_reporting: for each
+    location and week, the latest value published on or before `as_of`.
     """
-    path = Path(path)
-    archive = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path, dtype={"location": str})
+    if path is None:
+        archive = nhsn_hosp_reporting_archive()
+    elif Path(path).suffix == ".parquet":
+        archive = pd.read_parquet(path)
+    else:
+        archive = pd.read_csv(path, dtype={"location": str})
     archive = archive.assign(
         wk_end_date=pd.to_datetime(archive["wk_end_date"]), report_date=pd.to_datetime(archive["report_date"])
     )
@@ -29,8 +35,9 @@ class ScaleByCompletenessNowcaster(Nowcaster):
     """
     Divide each of the most recent weeks' values by its completeness: hospitals reporting that week divided by the
     usual number (the median number reporting the weeks config.typical_lags weeks before the location's newest week),
-    both as known on the reference date. Completeness is clipped to [config.min_completeness, 1]. A week whose
-    completeness cannot be computed (no reporting data for the location or week) is left unchanged.
+    both as known on the reference date (from config.reporting_path, or the Delphi archive). Completeness is clipped
+    to [config.min_completeness, 1]. A week whose completeness cannot be computed (no reporting data for the location
+    or week) is left unchanged.
     """
 
     def __init__(self, config: ScaleByCompletenessConfig):
@@ -42,7 +49,6 @@ class ScaleByCompletenessNowcaster(Nowcaster):
     def completeness(self, df: pd.DataFrame, as_of: datetime.date) -> pd.Series:
         """Completeness (unclipped) of each of the most recent weeks of config.source in `df`; NaN elsewhere."""
         cfg = self.config
-        assert cfg.reporting_path is not None  # checked by ScaleByCompletenessConfig
         reporting = load_reporting(cfg.reporting_path, as_of).set_index(["location", "wk_end_date"])["hosp_reporting"]
         rows = df.loc[self.recent_weeks(df), ["agg_level", "location", "wk_end_date"]]
         weeks = pd.to_datetime(rows["wk_end_date"])
