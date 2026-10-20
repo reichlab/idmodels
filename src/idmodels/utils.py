@@ -2,7 +2,10 @@
 # with updated model_name choices
 # In a future refactor, we should consolidate
 
+import calendar
 import datetime
+
+from idmodels.config import RunConfig
 
 
 def validate_ref_date(ref_date):
@@ -29,3 +32,8 @@ def build_save_path(root, run_config, model_config, subdir=None):
         save_dir = save_dir / subdir
     save_dir.mkdir(parents=True, exist_ok=True)
     return save_dir / f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
+
+
+def ref_date_seed(run_config: RunConfig) -> int:
+    """Seed for random number generation, based on reference date, so reruns for a date are reproducible."""
+    return int(calendar.timegm(run_config.ref_date.timetuple()))
