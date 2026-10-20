@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Scenario Modeling Hub (SMH) trajectory data as a GBQR training source (`SourceType.SMH`, flu only), via iddata's `SMHDataSource`
 - `GBQRModelConfig` fields for filtering SMH trajectories: `smh_model`, `smh_otid` (explicit output_type_ids), `smh_num_otid` (randomly sample this many ids within each round, location, and model), and `smh_otid_seed`
-- When SMH is a source, GBQR's time-series features (lags, rolling means, Taylor features, and horizon targets) are grouped by `(source, location, season)`, so each SMH trajectory is featurized as its own series. Runs without SMH keep the `(source, location)` grouping
+- When SMH is a source, GBQR's time-series features (lags, rolling means, Taylor features, and horizon targets) are grouped by `(source, location, season)`, so each SMH trajectory is featurized as its own series. In SMH runs this also applies to the other sources, so to measure SMH's effect, compare against a baseline that also groups by season. Runs without SMH keep the `(source, location)` grouping
 - When `smh_num_otid` is set and `artifact_store_root` is configured, the sampled trajectory ids for the requested locations are saved under `UMass-{model_name}/smh_otid/`
 - `IDModel._filter_sources_df()` hook for subclasses to filter the combined, loaded sources DataFrame
 - `group_columns` parameter on `LagFeature`, `TaylorFeature`, and `HorizonTargetFeature` (default `["source", "location"]`)

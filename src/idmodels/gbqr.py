@@ -188,7 +188,9 @@ class GBQRModel(IDModel):
         if self._uses_smh():
             # SMH trajectories share (source, location) and differ only in the season string (which encodes
             # scenario + output_type_id), so scope lag/rolling/Taylor/horizon-target features to season to keep
-            # them from treating every trajectory as one interleaved series.
+            # them from treating every trajectory as one interleaved series. This applies to every source in the run,
+            # not just SMH, so the surveillance sources are featurized differently than in the same config without
+            # SMH. To measure SMH's effect, compare against a baseline that also groups by season (see issue #36).
             group_cols = group_cols + ["season"]
 
         features: list[Feature] = []
