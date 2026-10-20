@@ -4,8 +4,12 @@
 
 import calendar
 import datetime
+from functools import lru_cache
+from importlib import resources
 
-from idmodels.config import RunConfig
+import pandas as pd
+
+from idmodels.config import RunConfig, SampleIdScheme
 
 
 def validate_ref_date(ref_date):
@@ -37,3 +41,31 @@ def build_save_path(root, run_config, model_config, subdir=None):
 def ref_date_seed(run_config: RunConfig) -> int:
     """Seed for random number generation, based on reference date, so reruns for a date are reproducible."""
     return int(calendar.timegm(run_config.ref_date.timetuple()))
+
+
+@lru_cache(maxsize=1)
+def load_state_abbreviations() -> dict[str, str]:
+    """Map state/national FIPS codes ("01", ..., "US") to postal abbreviations ("AL", ..., "US")."""
+    with resources.files("idmodels.data").joinpath("state_abbreviations.csv").open("r") as f:
+        df = pd.read_csv(f, dtype=str)
+    return dict(zip(df["fips"], df["abbreviation"]))
+
+
+def build_sample_output_type_ids(location: pd.Series, sample_index: pd.Series,
+                                 scheme: SampleIdScheme) -> pd.Series:
+    """
+    Label sample rows' output_type_ids from their location and 0-based sample_index:
+    - STATE_ABBREVIATION: "{abbreviation}{sample_index:02d}", e.g. "US00", "AL99"
+    - DRAW_NUMBER: "{sample_index + 1}", e.g. "1", "100"
+    """
+    if scheme == SampleIdScheme.STATE_ABBREVIATION:
+        abbreviations = load_state_abbreviations()
+        missing = set(location) - set(abbreviations)
+        if missing:
+            raise KeyError(f"No state abbreviation for location(s) {sorted(missing)}; "
+                           f"sample_id_scheme={scheme.value} only supports states and national.")
+        return location.map(abbreviations) + sample_index.map("{:02d}".format)
+    elif scheme == SampleIdScheme.DRAW_NUMBER:
+        return (sample_index + 1).astype(str)
+    else:
+        raise ValueError(f"Unsupported sample_id_scheme: {scheme}")
