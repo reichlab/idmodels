@@ -167,9 +167,12 @@ class GBQRModel(IDModel):
         return [source_map[s] for s in all_sources]
 
 
+    def _uses_smh(self) -> bool:
+        return SourceType.SMH in [self.model_config.main_source] + self.model_config.supplementary_sources
+
+
     def _filter_sources_df(self, df: pd.DataFrame, run_config: RunConfig) -> pd.DataFrame:
-        all_sources = [self.model_config.main_source] + self.model_config.supplementary_sources
-        if SourceType.SMH in all_sources:
+        if self._uses_smh():
             df = self._filter_smh(df, self.model_config, run_config)
         return df
 
@@ -177,27 +180,15 @@ class GBQRModel(IDModel):
     def _build_feature_pipeline(self, run_config: RunConfig) -> FeaturePipeline:
         if run_config.disease in (Disease.FLU, Disease.RSV):
             initial_feats = ["inc_trans_cs", "season_week", "log_pop"]
-            # Season-scoped grouping, for every flu/RSV run (not just SMH ones). timeseriesutils' lag,
-            # rolling, Taylor, and horizon-target features are row-based shifts, not date-based, so
-            # within (source, location) they silently bridge any gap in a source's rows:
-            # - FluSurvNet only reports season weeks ~10-40, so with (source, location) grouping its
-            #   early-season rows took lags/windows from the previous April, and its late-season rows
-            #   got horizon targets from the following October -- all inside the season_week 5-45
-            #   training window in _fit_and_predict. A few early ILINet national seasons have the
-            #   same kind of summer gap.
-            # - SMH trajectories share (source, location) and differ only in the season string (which
-            #   encodes scenario + output_type_id), so without season they would be treated as one
-            #   interleaved series.
-            # For sources reported year-round (NHSN, most ILINet), the cost is small: the longest
-            # lookback is 8 weeks (the 6-week Taylor window lagged by 2; timeseriesutils' trailing Taylor
-            # fit only starts one row after the first full window), so only training rows at season
-            # weeks 5-8 lose inputs from the previous season's late-July weeks. Horizon targets for
-            # in-season rows (week <= 45) don't reach past season week 52 for max_horizon <= 7, and
-            # forecast dates are well past week 8.
-            group_cols = ["source", "location", "season"]
         else:
             initial_feats = ["inc_trans_cs", "log_pop"]
-            group_cols = ["source", "location"]
+
+        group_cols = ["source", "location"]
+        if self._uses_smh():
+            # SMH trajectories share (source, location) and differ only in the season string (which encodes
+            # scenario + output_type_id), so scope lag/rolling/Taylor/horizon-target features to season to keep
+            # them from treating every trajectory as one interleaved series.
+            group_cols = group_cols + ["season"]
 
         features = []
 
@@ -250,7 +241,7 @@ class GBQRModel(IDModel):
             # one fit per main-source location (df_test holds only main-source rows). By design, SMH rows
             # don't contribute to these fits: their synthetic locations ("syn-06") give them unique_ids
             # ("statesyn-06") that never match a real location's ("state06"), so SMH only informs jointly fit models
-            if SourceType.SMH in [self.model_config.main_source] + self.model_config.supplementary_sources:
+            if self._uses_smh():
                 warnings.warn(SMH_UNUSED_WHEN_FITTING_SEPARATELY)
             unique_ids = df_test["unique_id"].unique()
             preds_df = pd.concat(

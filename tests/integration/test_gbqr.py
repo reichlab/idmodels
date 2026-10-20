@@ -414,9 +414,27 @@ def test_gbqr_filter_smh_raises_if_no_smh_rows_left(make_run_config, smh_model, 
         model._filter_smh(df, model_config, run_config)
 
 
+@pytest.mark.parametrize("main_source, supplementary_sources", [
+    (SourceType.NHSN, []),
+    (SourceType.NHSN, [SourceType.FLUSURVNET, SourceType.ILINET]),
+    (SourceType.NSSP, [SourceType.NHSN]),
+])
+def test_gbqr_feature_pipeline_groups_by_source_location_without_smh(make_run_config, main_source,
+                                                                      supplementary_sources):
+    """Without SMH, time-series features keep the (source, location) grouping, so forecasts are unchanged."""
+    model_config = create_test_gbqr_model_config(main_source=main_source, supplementary_sources=supplementary_sources)
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-12-07"), states=["US"], hsas=[])
+    pipeline = GBQRModel(model_config)._build_feature_pipeline(run_config)
+
+    grouped_steps = [f for f in pipeline.features if hasattr(f, "group_columns")]
+    assert grouped_steps
+    for step in grouped_steps:
+        assert step.group_columns == ["source", "location"], type(step).__name__
+
+
 def test_gbqr_feature_pipeline_does_not_bleed_across_smh_trajectories(make_run_config):
     """
-    For flu/RSV, GBQR's time-series features are grouped by (source, location, season). SMH
+    When SMH is a source, GBQR's time-series features are grouped by (source, location, season). SMH
     trajectories share source and location and differ only in the season string (which encodes
     scenario + output_type_id), so without season in the grouping, one trajectory's lags would be
     computed from another trajectory's values.
