@@ -219,6 +219,10 @@ class GBQRModel(IDModel):
 
     def _fit_and_predict(self, df: pd.DataFrame, feat_names: list[str], run_config: RunConfig) -> pd.DataFrame:
         """Fit bagged LightGBM and return long-format predictions in inc_trans_cs space."""
+        # raise rather than silently write a quantile-only file when samples were requested
+        if run_config.num_sample_forecasts > 0:
+            raise NotImplementedError("GBQR does not support sample forecasts yet; set num_sample_forecasts=0.")
+
         # keep only rows that are in-season
         if run_config.disease in (Disease.FLU, Disease.RSV):
             df = df.query("season_week >= 5 and season_week <= 45")
