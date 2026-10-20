@@ -81,7 +81,7 @@ class PeakModel(ABC):
         """
         Load data available on run_config.ref_date, forecast, and save a hub-formatted csv. Returns the forecast.
         Peak models use run_config's disease, ref_date, output_root, states (the locations to forecast), q_levels and
-        q_labels; artifact_store_root, max_horizon and hsas are ignored.
+        q_labels; artifact_store_root, max_horizon and hsas are ignored, and num_sample_forecasts must be 0.
         """
         inputs = self.load_inputs(run_config.ref_date)
         preds_df = self.forecast(inputs, run_config)
@@ -118,6 +118,11 @@ class PeakModel(ABC):
         # the data loaded by load_inputs() and the revision model's vintages are influenza-only
         if run_config.disease != Disease.FLU:
             raise ValueError(f"peak models support only influenza, not {Disease(run_config.disease).value!r}")
+        # sample output is trajectories of weekly incidence across forecast horizons, which peak targets (one
+        # season-level peak week and peak size per location, with no horizons) don't have; raise rather than
+        # silently write a file without the requested samples
+        if run_config.num_sample_forecasts > 0:
+            raise NotImplementedError("peak models do not support sample forecasts; set num_sample_forecasts=0.")
         season = season_of(run_config.ref_date)
         self.fit(inputs.data, season, run_config.q_levels)
         rng = np.random.default_rng(int(calendar.timegm(run_config.ref_date.timetuple())))

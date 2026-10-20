@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SARIXModel` sample output: posterior predictive draws are subsampled without replacement (seeded by `ref_date`), using the same draws for every location
 - Vendored `data/state_abbreviations.csv` mapping state/national FIPS codes to postal abbreviations
 - `GBQRModel` raises `NotImplementedError` when `num_sample_forecasts > 0` (GBQR sample generation is not yet supported)
+- Peak models (`PeakBaselineModel`, `PeakGBQRModel`) raise `NotImplementedError` when `num_sample_forecasts > 0`, since peak targets have no forecast horizons to form trajectories over
 
 ### Changed
 - `IDModel._fit_and_predict` implementations now set `output_type` on each row (previously hardcoded to `"quantile"` in `_format_output`); sample rows carry a 0-based `sample_index` that `_format_output` turns into `output_type_id`
