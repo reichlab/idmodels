@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Sample-format forecasts (`output_type == "sample"`), written alongside quantile rows: `RunConfig.num_sample_forecasts` sets the number of sample trajectories per location (default `0`, no samples)
+- `SampleIdScheme` and `RunConfig.sample_id_scheme` for labeling sample `output_type_id`s: `STATE_ABBREVIATION` (`US00`, `AL01`, ...; states/national only, at most 100 samples) or `DRAW_NUMBER` (`1`, `2`, ...; any location, with a per-location prefix expected to be added downstream)
+- `SARIXModel` sample output: posterior predictive draws are subsampled without replacement (seeded by `ref_date`), using the same draws for every location
+- Vendored `data/state_abbreviations.csv` mapping state/national FIPS codes to postal abbreviations
+- `GBQRModel` raises `NotImplementedError` when `num_sample_forecasts > 0` (GBQR sample generation is not yet supported)
+
+### Changed
+- `IDModel._fit_and_predict` implementations now set `output_type` on each row (previously hardcoded to `"quantile"` in `_format_output`); sample rows carry a 0-based `sample_index` that `_format_output` turns into `output_type_id`
+- The `ref_date`-based random seed helper moved from `gbqr.py` to `idmodels.utils.ref_date_seed`, shared by GBQR and SARIX
+
 ## [2.2.0] - 2026-10-19
 
 ### Added
