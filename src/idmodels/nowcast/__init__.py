@@ -1,10 +1,12 @@
-from idmodels.config import NowcastConfig, ScaleByCompletenessConfig
+from idmodels.config import NowcastConfig, ScaleByCompletenessConfig, ScaleByStateConfig
 from idmodels.nowcast.base import Nowcaster
 from idmodels.nowcast.completeness import ScaleByCompletenessNowcaster
+from idmodels.nowcast.state import ScaleByStateNowcaster
 
 # nowcaster class for each nowcast config class
 _NOWCASTERS: dict[type[NowcastConfig], type[Nowcaster]] = {
     ScaleByCompletenessConfig: ScaleByCompletenessNowcaster,
+    ScaleByStateConfig: ScaleByStateNowcaster,
 }
 
 
@@ -15,4 +17,4 @@ def build_nowcaster(config: NowcastConfig) -> Nowcaster:
     return _NOWCASTERS[type(config)](config)
 
 
-__all__ = ["Nowcaster", "ScaleByCompletenessNowcaster", "build_nowcaster"]
+__all__ = ["Nowcaster", "ScaleByCompletenessNowcaster", "ScaleByStateNowcaster", "build_nowcaster"]

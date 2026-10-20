@@ -187,3 +187,18 @@ def test_reads_delphi_archive_without_reporting_path(tmp_path):
         out = ScaleByCompletenessNowcaster(ScaleByCompletenessConfig()).apply(_data(), AS_OF)
     delphi.assert_called_once()
     assert _inc(out, "nhsn", "01") == pytest.approx(16.0)
+
+
+def test_reporting_is_read_as_of_the_release_the_data_come_from(tmp_path):
+    # Friday's update has all hospitals; the counts come from Wednesday's release, when half had reported
+    path = _reporting(
+        tmp_path,
+        [
+            {"location": "01", "wk_end_date": NEWEST, "report_date": "2026-01-14", "hosp_reporting": 50},
+            {"location": "01", "wk_end_date": NEWEST, "report_date": "2026-01-16", "hosp_reporting": 100},
+        ],
+    )
+    saturday = datetime.date(2026, 1, 17)
+    assert _nowcaster(path).release_date(saturday) == datetime.date(2026, 1, 14)
+    assert _inc(_nowcaster(path).apply(_data(), saturday), "nhsn", "01") == pytest.approx(16.0)
+    assert _inc(_nowcaster(path, release_weekday=None).apply(_data(), saturday), "nhsn", "01") == pytest.approx(8.0)

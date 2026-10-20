@@ -3,7 +3,7 @@ As-of data from the Delphi Epidata archive (https://delphi.cmu.edu/epidata/v5/ar
 value of a signal together with the date it was published.
 
 This is a stopgap until iddata reads Delphi data itself; it is used for data that the iddata snapshots do not have,
-such as the number of hospitals reporting to NHSN.
+such as the number of hospitals reporting to NHSN, and for the history of NHSN revisions.
 """
 
 import functools
@@ -21,6 +21,7 @@ DELPHI_ARCHIVE_URL = "https://delphi.cmu.edu/epidata/v5/archive/"
 # one epidatr and epidatpy use
 DELPHI_API_KEY_ENV = "DELPHI_EPIDATA_KEY"
 NHSN_HOSP_REPORTING_SIGNAL = "hosprep_confirmed_admissions_flu_ew"
+NHSN_ADMISSIONS_SIGNAL = "confirmed_admissions_flu_ew"
 
 
 def fetch_archive(source: str, signal: str, geo_type: str, timeout: float = 300) -> pd.DataFrame:
@@ -45,10 +46,10 @@ def fetch_archive(source: str, signal: str, geo_type: str, timeout: float = 300)
     return archive
 
 
-@functools.lru_cache(maxsize=1)
-def _nhsn_hosp_reporting() -> pd.DataFrame:
+@functools.lru_cache(maxsize=4)
+def _nhsn_archive(signal: str) -> pd.DataFrame:
     archive = pd.concat(
-        [fetch_archive("nhsn", NHSN_HOSP_REPORTING_SIGNAL, geo_type) for geo_type in ["nation", "state"]],
+        [fetch_archive("nhsn", signal, geo_type) for geo_type in ["nation", "state"]],
         ignore_index=True,
     )
     # keep the published values (other fill methods are Delphi's imputations)
@@ -63,9 +64,13 @@ def _nhsn_hosp_reporting() -> pd.DataFrame:
             "location": location,
             "wk_end_date": pd.to_datetime(archive["reference_time"]),
             "report_date": pd.to_datetime(archive["report_time"]).dt.tz_localize(None).dt.normalize(),
-            "hosp_reporting": archive["value"].astype(float),
+            "value": archive["value"].astype(float),
         }
     ).reset_index(drop=True)
+
+
+def _nhsn_archive_as(signal: str, name: str) -> pd.DataFrame:
+    return _nhsn_archive(signal).rename(columns={"value": name})
 
 
 def nhsn_hosp_reporting_archive() -> pd.DataFrame:
@@ -74,4 +79,12 @@ def nhsn_hosp_reporting_archive() -> pd.DataFrame:
     archive (published values from 2024-12 on): columns location (FIPS code, or "US"), wk_end_date, report_date (the
     date the value was published) and hosp_reporting. Fetched once per process.
     """
-    return _nhsn_hosp_reporting().copy()
+    return _nhsn_archive_as(NHSN_HOSP_REPORTING_SIGNAL, "hosp_reporting")
+
+
+def nhsn_admissions_archive() -> pd.DataFrame:
+    """
+    As-of archive of NHSN flu admissions (counts), by location and week, from the Delphi archive: columns location,
+    wk_end_date, report_date and admissions, as for nhsn_hosp_reporting_archive(). Fetched once per process.
+    """
+    return _nhsn_archive_as(NHSN_ADMISSIONS_SIGNAL, "admissions")

@@ -53,6 +53,30 @@ class ScaleByCompletenessConfig(NowcastConfig):
     # completeness is floored at this value, which caps the scale-up at 1 / min_completeness; it is capped at 1, so
     # values are never scaled down
     min_completeness: float = 0.05
+    # the weekday (Monday = 0) of the NHSN release the model's data come from: reporting data are read as of the
+    # latest such day on or before the reference date, to match the counts. iddata's NHSN snapshots, like FluSight,
+    # use the Wednesday release; Friday's update has more hospitals reporting. None reads them as of the reference date.
+    release_weekday: int | None = 2
+
+
+@dataclass
+class ScaleByStateConfig(ScaleByCompletenessConfig):
+    """
+    Scale by completeness, then correct the scaled value by a factor for its location (the "state effect"), learned
+    from the location's earlier weeks this season: the mean of log((settled + 1) / (scaled + 1)) on the count scale,
+    over the weeks at least `settle_weeks` older than the newest, shrunk toward 0 (no correction) by n / (n + shrink).
+    For each such week, "scaled" is its first value scaled by its completeness, both as published at the same point
+    in the release cycle as the reference date, and "settled" is its value as published on the reference date.
+    """
+
+    # as-of archive of NHSN admissions (counts): a csv or parquet file with columns location, wk_end_date,
+    # report_date and admissions. None (the default) reads it from the Delphi Epidata archive.
+    admissions_path: Path | None = None
+    shrink: float = 10.0
+    settle_weeks: int = 4
+    # the season starts on the first day of this month; only this season's weeks are used to learn the factors,
+    # because they do not carry over from one season to the next
+    season_start_month: int = 10
 
 
 @dataclass

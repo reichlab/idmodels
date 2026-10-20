@@ -39,9 +39,9 @@ def _urlopen(geo_types=_ARCHIVE):
 
 @pytest.fixture(autouse=True)
 def _fresh_cache():
-    delphi._nhsn_hosp_reporting.cache_clear()
+    delphi._nhsn_archive.cache_clear()
     yield
-    delphi._nhsn_hosp_reporting.cache_clear()
+    delphi._nhsn_archive.cache_clear()
 
 
 @pytest.fixture
