@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SampleIdScheme` and `RunConfig.sample_id_scheme` for labeling sample `output_type_id`s: `STATE_ABBREVIATION` (`US00`, `AL01`, ...; states/national only, at most 100 samples) or `DRAW_NUMBER` (`1`, `2`, ...; any location, with a per-location prefix expected to be added downstream)
 - `SARIXModel` sample output: posterior predictive draws are subsampled without replacement (seeded by `ref_date`), using the same draws for every location
 - Vendored `data/state_abbreviations.csv` mapping state/national FIPS codes to postal abbreviations
-- `GBQRModel` raises `NotImplementedError` when `num_sample_forecasts > 0` (GBQR sample generation is not yet supported)
+- `IDModel.supports_sample_forecasts` (`True` for `SARIXModel`): `IDModel.run()` raises `NotImplementedError` before loading any data when `num_sample_forecasts > 0` for a model that doesn't support samples, such as `GBQRModel`
 - Peak models (`PeakBaselineModel`, `PeakGBQRModel`) raise `NotImplementedError` when `num_sample_forecasts > 0`, since peak targets have no forecast horizons to form trajectories over
 
 ### Changed

@@ -27,6 +27,9 @@ class IDModel(ABC):
     _build_feature_pipeline(), and _fit_and_predict(). run() orchestrates the full workflow.
     """
 
+    # whether _fit_and_predict can produce sample rows; models that can't refuse runs that request samples
+    supports_sample_forecasts: bool = False
+
 
     def __init__(self, model_config: ModelConfig):
         self.model_config = model_config
@@ -34,6 +37,11 @@ class IDModel(ABC):
 
     def run(self, run_config: RunConfig) -> None:
         """Load data, generate predictions, and save to file."""
+        # raise before loading any data, rather than silently write a file without the requested samples
+        if run_config.num_sample_forecasts > 0 and not self.supports_sample_forecasts:
+            raise NotImplementedError(f"{type(self).__name__} does not support sample forecasts yet; "
+                                      f"set num_sample_forecasts=0.")
+
         sources = self._build_sources(run_config)
         df = DiseaseDataLoader().load(sources=sources, as_of=run_config.ref_date, ancillary=[PopulationData()])
         df = self._filter_sources_df(df, run_config)

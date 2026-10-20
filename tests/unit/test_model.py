@@ -13,8 +13,9 @@ class _FakeModel(IDModel):
     """Minimal concrete IDModel for testing base-class behavior in isolation.
 
     Only exists so IDModel (an ABC) can be instantiated to call base-class methods like
-    _raise_if_incomplete() and _format_output() directly. These hooks are never meant to run; NotImplementedError makes it loud and
-    immediate if a test ever exercises them by accident instead of silently misbehaving.
+    _raise_if_incomplete() and _format_output() directly. These hooks are never meant to run;
+    NotImplementedError makes it loud and immediate if a test ever exercises them by accident
+    instead of silently misbehaving.
     """
 
     def _build_sources(self, run_config):
@@ -25,6 +26,31 @@ class _FakeModel(IDModel):
 
     def _fit_and_predict(self, df, feat_names, run_config):
         raise NotImplementedError
+
+
+class _SourcesReached(Exception):
+    pass
+
+
+class _FakeSampleModel(_FakeModel):
+    """Supports sample forecasts; signals when run() gets past the sample check to _build_sources()."""
+
+    supports_sample_forecasts = True
+
+    def _build_sources(self, run_config):
+        raise _SourcesReached
+
+
+def test_run_rejects_samples_before_loading_data_when_unsupported():
+    run_config = Mock(num_sample_forecasts=5)
+    with pytest.raises(NotImplementedError, match="_FakeModel does not support sample forecasts"):
+        _FakeModel(model_config=Mock()).run(run_config)
+
+
+def test_run_allows_samples_when_supported():
+    run_config = Mock(num_sample_forecasts=5)
+    with pytest.raises(_SourcesReached):
+        _FakeSampleModel(model_config=Mock()).run(run_config)
 
 
 def test_raise_if_incomplete_raises_on_any_nan_value():

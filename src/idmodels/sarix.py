@@ -13,6 +13,8 @@ from idmodels.utils import ref_date_seed
 class SARIXModel(IDModel):
     """SARIX (Bayesian ARIMA with exogenous covariates) forecast model."""
 
+    supports_sample_forecasts = True
+
 
     def __init__(self, model_config: SARIXModelConfig):
         # Narrow self.model_config from ModelConfig to SARIXModelConfig so that
