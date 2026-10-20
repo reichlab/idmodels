@@ -286,7 +286,9 @@ class TestRollingMeanFeature:
 
     def test_default_group_columns(self):
         feat = RollingMeanFeature(column="inc_trans_cs", window_sizes=[2])
-        assert feat.group_columns == ["location"]
+        # matches the other time-series features: grouping by location alone would compute rolling
+        # means across sources
+        assert feat.group_columns == ["source", "location"]
 
 
     def test_produces_valid_non_nan_values(self):

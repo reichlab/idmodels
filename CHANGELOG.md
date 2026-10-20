@@ -7,13 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-19
+
 ### Added
+- Scenario Modeling Hub (SMH) trajectory data as a GBQR training source (`SourceType.SMH`, flu only), via iddata's `SMHDataSource`
+- `GBQRModelConfig` fields for filtering SMH trajectories: `smh_model`, `smh_otid` (explicit output_type_ids), `smh_num_otid` (randomly sample this many ids within each round, location, and model), and `smh_otid_seed`
+- When SMH is a source, GBQR's time-series features (lags, rolling means, Taylor features, and horizon targets) are grouped by `(source, location, season)`, so each SMH trajectory is featurized as its own series. In SMH runs this also applies to the other sources, so to measure SMH's effect, compare against a baseline that also groups by season. Runs without SMH keep the `(source, location)` grouping
+- When `smh_num_otid` is set and `artifact_store_root` is configured, the sampled trajectory ids for the requested locations are saved under `UMass-{model_name}/smh_otid/`
+- `IDModel._filter_sources_df()` hook for subclasses to filter the combined, loaded sources DataFrame
+- `group_columns` parameter on `LagFeature`, `TaylorFeature`, and `HorizonTargetFeature` (default `["source", "location"]`)
+- Warning when SMH is combined with `fit_locations_separately=True`, raised both when the config is created and at run time, since per-location fits never use SMH data
+- `joblib` dependency
 - `idmodels.peak`: direct models for the FluSight seasonal targets `peak week inc flu hosp` (pmf) and `peak inc flu hosp` (quantiles): `PeakBaselineModel` (conditional climatology) and `PeakGBQRModel` (LightGBM quantile regression + multiclass timing, bagged over seasons), configured with `PeakBaselineModelConfig` and `PeakGBQRModelConfig`
 - Season-replay training set construction from NHSN, ILINet and FluSurvNet seasons (`idmodels.peak.series`)
 - NHSN data-revision model (`idmodels.peak.revision`): block bootstrap of revision vectors estimated from NHSN vintages; peak forecasts propagate revision uncertainty by Monte Carlo so that past weeks that could be revised into the peak receive probability, and every peak-week probability is floored (`PeakModelConfig.pmf_floor`)
 - Peak GBQR feature groups (`PeakGBQRModelConfig.size_feature_groups` / `timing_feature_groups`): core, synchrony and burden-to-date, and Christmas / New Year holiday-week features
 - `PeakModelConfig.drop_missing_locations` (default `False`): peak forecasts raise an error when a requested location has no current-season NHSN data, unless this is set; peak models raise an error for diseases other than influenza
 - `s3fs` is a direct dependency (used to list NHSN data vintages)
+
+### Changed
+- GBQR bag × quantile model fits now run in parallel with `joblib` (threads), with results still deterministic
+- `RollingMeanFeature` now honors its `group_columns` argument (previously overridden), and its default is `["source", "location"]` to match the other features
+- `IDModel._filter_locations()` matches requested states on the last two characters of `location`, restricted to state/national rows, so SMH's synthetic `syn-XX` locations are kept
+- `GBQRModel` uses the same `ref_date`-based seed for SMH trajectory sampling (when `smh_otid_seed` is unset) as for bagging
+- Updated `iddata` dependency to `6f55530`
+
+### Fixed
+- `GBQRModel` silently writing an empty submission CSV when the main source's latest week lagged another source's; the test set is now the main source's latest week
+- `IDModel._raise_if_incomplete()` now also raises on an empty prediction set
 
 ## [2.1.0]
 

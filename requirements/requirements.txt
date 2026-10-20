@@ -32,7 +32,7 @@ frozenlist==1.5.0
     #   aiosignal
 fsspec==2024.10.0
     # via s3fs
-iddata @ git+https://github.com/reichlab/iddata@5f99e09115b977cca76be41d68e971c55f8e2a89
+iddata @ git+https://github.com/reichlab/iddata@6f5553008b4cabdaeb231ccf632c35e6d0ebab4b
     # via idmodels (pyproject.toml)
 idna==3.10
     # via yarl
@@ -47,7 +47,9 @@ jaxlib==0.8.0
 jmespath==1.0.1
     # via botocore
 joblib==1.4.2
-    # via scikit-learn
+    # via
+    #   idmodels (pyproject.toml)
+    #   scikit-learn
 kiwisolver==1.4.7
     # via matplotlib
 lightgbm==4.5.0
@@ -99,6 +101,8 @@ pillow==11.0.0
     # via matplotlib
 propcache==0.2.0
     # via yarl
+pyarrow==25.0.1
+    # via iddata
 pygments==2.18.0
     # via rich
 pymmwr==0.2.2
