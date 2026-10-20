@@ -79,6 +79,7 @@ class SARIXModel(IDModel):
             ]
         ).reset_index() \
             .melt(["unique_id", "output_type_id"], var_name="horizon") \
+            .assign(output_type="quantile") \
             .merge(df_data_last_obs, on="unique_id", how="left")
 
         # value is already in inc_trans_cs space (SARIX predicts inc_trans_cs directly)

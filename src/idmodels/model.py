@@ -18,7 +18,7 @@ from idmodels.transforms import (
     SourceScaleTransform,
     Transform,
 )
-from idmodels.utils import build_save_path
+from idmodels.utils import build_sample_output_type_ids, build_save_path
 
 
 class IDModel(ABC):
@@ -77,12 +77,16 @@ class IDModel(ABC):
     @abstractmethod
     def _fit_and_predict(self, df: pd.DataFrame, feat_names: list[str], run_config: RunConfig) -> pd.DataFrame:
         """
-        Fit model and generate quantile predictions.
+        Fit model and generate quantile predictions, plus sample predictions if
+        run_config.num_sample_forecasts > 0.
 
         Returns long-format DataFrame with columns:
             source, agg_level, location, wk_end_date, pop, horizon,
             inc_trans_cs, inc_trans_center_factor, inc_trans_scale_factor,
-            output_type_id, value (in inc_trans_cs space)
+            output_type ("quantile" or "sample"), output_type_id, value (in inc_trans_cs space)
+        Quantile rows' output_type_id is the quantile label. Sample rows instead carry an integer
+        sample_index (0-based draw number, consistent across locations) and are labeled later, by
+        _format_output, according to run_config.sample_id_scheme.
         """
         ...
 
@@ -161,7 +165,6 @@ class IDModel(ABC):
         preds_df["horizon"] = (
                 pd.to_timedelta(preds_df["target_end_date"].dt.date - run_config.ref_date).dt.days / 7
         ).astype(int)
-        preds_df["output_type"] = "quantile"
         preds_df["target"] = target_name
         preds_df.drop(columns="wk_end_date", inplace=True)
 
@@ -175,10 +178,22 @@ class IDModel(ABC):
         if len(preds_df["geo_level"].unique()) > 1:
             req_cols = ["agg_level"] + req_cols
 
-        return preds_df.sort_values(
-            ["output_type_id", "horizon", "location", "agg_level"],
-            ascending=[True, True, True, False],
-        ).reset_index(drop=True)[req_cols]
+        # quantile rows first, then sample rows. Samples sort by their numeric index rather than their
+        # label, since DRAW_NUMBER labels aren't zero-padded ("10" sorts before "2" as a string)
+        sort_cols = ["horizon", "location", "agg_level"]
+        ascending = [True, True, False]
+        is_sample = preds_df["output_type"] == "sample"
+        out_df = preds_df.loc[~is_sample].sort_values(["output_type_id"] + sort_cols, ascending=[True] + ascending)
+        if is_sample.any():
+            samples_df = preds_df.loc[is_sample].copy()
+            samples_df["sample_index"] = samples_df["sample_index"].astype(int)
+            samples_df["output_type_id"] = build_sample_output_type_ids(samples_df["location"],
+                                                                        samples_df["sample_index"],
+                                                                        run_config.sample_id_scheme)
+            samples_df = samples_df.sort_values(["sample_index"] + sort_cols, ascending=[True] + ascending)
+            out_df = pd.concat([out_df, samples_df])
+
+        return out_df.reset_index(drop=True)[req_cols]
 
 
     def _raise_if_incomplete(self, preds_df: pd.DataFrame, run_config: RunConfig, save_path) -> None:

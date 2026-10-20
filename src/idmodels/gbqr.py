@@ -246,6 +246,7 @@ class GBQRModel(IDModel):
         else:
             preds_df = self._train_gbq_and_predict(run_config, df_train, df_test, feat_names)
 
+        preds_df["output_type"] = "quantile"
         return preds_df
 
     def _train_gbq_and_predict(self, run_config, df_train, df_test, feat_names, unique_id=None):
