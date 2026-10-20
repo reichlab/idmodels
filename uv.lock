@@ -593,9 +593,11 @@ dependencies = [
     { name = "lightgbm" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "s3fs" },
     { name = "sarix" },
     { name = "scikit-learn" },
     { name = "timeseriesutils" },
+    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -617,9 +619,11 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
+    { name = "s3fs" },
     { name = "sarix", git = "https://github.com/reichlab/sarix?rev=35eea2379a9790e0457b1aed41d13509e5d5056f" },
     { name = "scikit-learn" },
     { name = "timeseriesutils", git = "https://github.com/reichlab/timeseriesutils" },
+    { name = "tqdm" },
 ]
 provides-extras = ["dev"]
 

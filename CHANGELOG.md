@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `group_columns` parameter on `LagFeature`, `TaylorFeature`, and `HorizonTargetFeature` (default `["source", "location"]`)
 - Warning when SMH is combined with `fit_locations_separately=True`, raised both when the config is created and at run time, since per-location fits never use SMH data
 - `joblib` dependency
+- `idmodels.peak`: direct models for the FluSight seasonal targets `peak week inc flu hosp` (pmf) and `peak inc flu hosp` (quantiles): `PeakBaselineModel` (conditional climatology) and `PeakGBQRModel` (LightGBM quantile regression + multiclass timing, bagged over seasons), configured with `PeakBaselineModelConfig` and `PeakGBQRModelConfig`
+- Season-replay training set construction from NHSN, ILINet and FluSurvNet seasons (`idmodels.peak.series`)
+- NHSN data-revision model (`idmodels.peak.revision`): block bootstrap of revision vectors estimated from NHSN vintages; peak forecasts propagate revision uncertainty by Monte Carlo so that past weeks that could be revised into the peak receive probability, and every peak-week probability is floored (`PeakModelConfig.pmf_floor`)
+- Peak GBQR feature groups (`PeakGBQRModelConfig.size_feature_groups` / `timing_feature_groups`): core, synchrony and burden-to-date, and Christmas / New Year holiday-week features
+- `PeakModelConfig.drop_missing_locations` (default `False`): peak forecasts raise an error when a requested location has no current-season NHSN data, unless this is set; peak models raise an error for diseases other than influenza
+- `s3fs` is a direct dependency (used to list NHSN data vintages)
 
 ### Changed
 - GBQR bag × quantile model fits now run in parallel with `joblib` (threads), with results still deterministic
@@ -29,9 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `GBQRModel` silently writing an empty submission CSV when the main source's latest week lagged another source's; the test set is now the main source's latest week
 - `IDModel._raise_if_incomplete()` now also raises on an empty prediction set
-
-### Removed
-- `tqdm` as a direct dependency (no longer used; it is still installed via `numpyro`)
 
 ## [2.1.0]
 
