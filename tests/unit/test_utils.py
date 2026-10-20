@@ -4,7 +4,8 @@ import pandas as pd
 import pytest
 
 from idmodels.config import SampleIdScheme
-from idmodels.utils import build_sample_output_type_ids, load_state_abbreviations
+from idmodels.data import load_state_abbreviations
+from idmodels.utils import build_sample_output_type_ids
 
 
 def test_state_abbreviations_cover_same_locations_as_state_centroids():

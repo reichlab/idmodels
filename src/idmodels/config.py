@@ -10,6 +10,8 @@ from iddata.enums import (
     SourceType,  # re-exported for callers: from idmodels.config import SourceType
 )
 
+from idmodels.data import load_state_abbreviations
+
 SMH_UNUSED_WHEN_FITTING_SEPARATELY = (
     "SMH is a source but fit_locations_separately=True: SMH data will not be used for fitting, since "
     "per-location fits only train on each real location's own rows and never include SMH's synthetic "
@@ -80,6 +82,12 @@ class RunConfig:
             if self.hsas:
                 raise ValueError(f"sample_id_scheme={self.sample_id_scheme.value} only supports states and national; "
                                  f"use {SampleIdScheme.DRAW_NUMBER.value} to output samples for HSAs.")
+            # checked here rather than when labeling, which only happens after the model has been fit
+            unmapped = sorted(set(self.states) - set(load_state_abbreviations()))
+            if unmapped:
+                raise ValueError(f"No state abbreviation for state(s) {unmapped}, which sample_id_scheme="
+                                 f"{self.sample_id_scheme.value} needs; add them to idmodels/data/"
+                                 f"state_abbreviations.csv or use {SampleIdScheme.DRAW_NUMBER.value}.")
 
 
 @dataclass

@@ -52,6 +52,17 @@ def test_run_config_state_abbreviation_rejects_hsas_when_sampling():
         _run_config(5, SampleIdScheme.STATE_ABBREVIATION, hsas=["1"])
 
 
+def test_run_config_state_abbreviation_rejects_unmapped_states_when_sampling():
+    """Fails when the config is created rather than after fitting, when sample rows are labeled."""
+    with pytest.raises(ValueError, match=r"No state abbreviation for state\(s\) \['66'\]"):
+        _run_config(5, SampleIdScheme.STATE_ABBREVIATION, states=["US", "66"])
+
+
+@pytest.mark.parametrize("num, scheme", [(0, SampleIdScheme.STATE_ABBREVIATION), (5, SampleIdScheme.DRAW_NUMBER)])
+def test_run_config_allows_unmapped_states_when_not_labeling_by_abbreviation(num, scheme):
+    _run_config(num, scheme, states=["US", "66"])  # should not raise
+
+
 @pytest.mark.parametrize("scheme", list(SampleIdScheme))
 def test_run_config_allows_hsas_without_samples(scheme):
     _run_config(0, scheme, hsas=["1"])  # should not raise
