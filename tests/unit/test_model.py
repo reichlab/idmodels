@@ -1,11 +1,12 @@
 import datetime
+from pathlib import Path
 from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 from iddata.enums import Disease
 
-from idmodels.config import SampleIdScheme, SourceType
+from idmodels.config import RunConfig, SampleIdScheme, SourceType
 from idmodels.model import IDModel
 
 
@@ -50,6 +51,15 @@ def test_run_rejects_samples_before_loading_data_when_unsupported():
 def test_run_allows_samples_when_supported():
     run_config = Mock(num_sample_forecasts=5)
     with pytest.raises(_SourcesReached):
+        _FakeSampleModel(model_config=Mock()).run(run_config)
+
+
+def test_run_validates_run_config_changed_after_construction():
+    run_config = RunConfig(disease=Disease.FLU, ref_date=datetime.date(2024, 1, 6), output_root=Path("model-output"),
+                           artifact_store_root=None, max_horizon=3, states=["US"], hsas=[], q_levels=[0.5],
+                           q_labels=["0.5"], num_sample_forecasts=5)
+    run_config.num_sample_forecasts = 101  # over the STATE_ABBREVIATION limit, bypassing __post_init__
+    with pytest.raises(ValueError, match="at most 100"):
         _FakeSampleModel(model_config=Mock()).run(run_config)
 
 

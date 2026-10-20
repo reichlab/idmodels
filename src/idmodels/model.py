@@ -37,6 +37,7 @@ class IDModel(ABC):
 
     def run(self, run_config: RunConfig) -> None:
         """Load data, generate predictions, and save to file."""
+        run_config.validate()
         # raise before loading any data, rather than silently write a file without the requested samples
         if run_config.num_sample_forecasts > 0 and not self.supports_sample_forecasts:
             raise NotImplementedError(f"{type(self).__name__} does not support sample forecasts yet; "

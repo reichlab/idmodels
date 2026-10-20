@@ -72,6 +72,14 @@ class RunConfig:
 
 
     def __post_init__(self):
+        self.validate()
+
+
+    def validate(self):
+        """
+        Raise if the sample output settings are invalid. Runs when the config is created and again when a model
+        runs, since fields (e.g. num_sample_forecasts, states, hsas) can be changed after construction.
+        """
         if self.num_sample_forecasts < 0:
             raise ValueError(f"num_sample_forecasts must be at least 0, got {self.num_sample_forecasts}.")
         if self.num_sample_forecasts > 0 and self.sample_id_scheme == SampleIdScheme.STATE_ABBREVIATION:

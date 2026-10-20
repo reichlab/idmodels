@@ -70,3 +70,12 @@ def test_run_config_allows_hsas_without_samples(scheme):
 
 def test_run_config_draw_number_allows_hsas_and_over_100():
     _run_config(500, SampleIdScheme.DRAW_NUMBER, hsas=["1"])  # should not raise
+
+
+def test_run_config_validate_catches_changes_after_construction():
+    run_config = _run_config(5, SampleIdScheme.STATE_ABBREVIATION)
+    run_config.validate()  # should not raise
+
+    run_config.hsas = ["1"]
+    with pytest.raises(ValueError, match="only supports states and national"):
+        run_config.validate()
