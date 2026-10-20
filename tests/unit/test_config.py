@@ -79,3 +79,23 @@ def test_run_config_validate_catches_changes_after_construction():
     run_config.hsas = ["1"]
     with pytest.raises(ValueError, match="only supports states and national"):
         run_config.validate()
+
+
+def test_run_config_allows_samples_only():
+    run_config = _run_config(5, SampleIdScheme.DRAW_NUMBER)
+    run_config.q_levels, run_config.q_labels = [], []
+    run_config.validate()  # should not raise
+
+
+def test_run_config_rejects_no_quantiles_and_no_samples():
+    run_config = _run_config(0)
+    run_config.q_levels, run_config.q_labels = [], []
+    with pytest.raises(ValueError, match="requests no output"):
+        run_config.validate()
+
+
+def test_run_config_rejects_mismatched_quantile_levels_and_labels():
+    run_config = _run_config(0)
+    run_config.q_labels = ["0.5", "0.9"]
+    with pytest.raises(ValueError, match="same length"):
+        run_config.validate()

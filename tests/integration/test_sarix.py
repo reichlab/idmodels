@@ -253,16 +253,18 @@ def test_sarix_samples_state_abbreviation(make_run_config):
     assert sample_df["value"].astype(float).between(0, 1).all()  # NSSP is output as a proportion
 
 
-def test_sarix_samples_draw_number_with_hsas(make_run_config):
+def test_sarix_samples_only_draw_number_with_hsas(make_run_config):
     date = datetime.date.fromisoformat("2025-11-22")
     model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
                                                   sigma_pooling=PoolingStrategy.NONE, num=50)
     run_config = make_run_config(ref_date=date, states=["US", "01"], hsas=["1", "25"], num_sample_forecasts=12,
                                  sample_id_scheme=SampleIdScheme.DRAW_NUMBER)
+    run_config.q_levels, run_config.q_labels = [], []  # samples only
     SARIXModel(model_config).run(run_config)
     actual_df = _read_output(run_config, model_config)
 
-    sample_df = actual_df.loc[actual_df["output_type"] == "sample"]
+    assert (actual_df["output_type"] == "sample").all()
+    sample_df = actual_df
     assert set(sample_df["agg_level"]) == {"national", "state", "hsa"}
     assert len(sample_df) == 4 * run_config.max_horizon * 12
     # every location gets ids 1..12, in numeric order

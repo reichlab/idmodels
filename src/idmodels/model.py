@@ -191,18 +191,23 @@ class IDModel(ABC):
         # label, since DRAW_NUMBER labels aren't zero-padded ("10" sorts before "2" as a string)
         sort_cols = ["horizon", "location", "agg_level"]
         ascending = [True, True, False]
+        # either block may be empty: a run can be quantiles only or samples only (and samples-only rows have no
+        # output_type_id column until they are labeled here)
         is_sample = preds_df["output_type"] == "sample"
-        out_df = preds_df.loc[~is_sample].sort_values(["output_type_id"] + sort_cols, ascending=[True] + ascending)
+        blocks = []
+        # an empty preds_df passes through as-is, for _raise_if_incomplete() to report
+        if (~is_sample).any() or preds_df.empty:
+            blocks.append(preds_df.loc[~is_sample].sort_values(["output_type_id"] + sort_cols,
+                                                               ascending=[True] + ascending))
         if is_sample.any():
             samples_df = preds_df.loc[is_sample].copy()
             samples_df["sample_index"] = samples_df["sample_index"].astype(int)
             samples_df["output_type_id"] = build_sample_output_type_ids(samples_df["location"],
                                                                         samples_df["sample_index"],
                                                                         run_config.sample_id_scheme)
-            samples_df = samples_df.sort_values(["sample_index"] + sort_cols, ascending=[True] + ascending)
-            out_df = pd.concat([out_df, samples_df])
+            blocks.append(samples_df.sort_values(["sample_index"] + sort_cols, ascending=[True] + ascending))
 
-        return out_df.reset_index(drop=True)[req_cols]
+        return pd.concat(blocks).reset_index(drop=True)[req_cols]
 
 
     def _raise_if_incomplete(self, preds_df: pd.DataFrame, run_config: RunConfig, save_path) -> None:

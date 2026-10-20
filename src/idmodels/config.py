@@ -55,7 +55,10 @@ class ModelConfig(ABC):
 
 @dataclass
 class RunConfig:
-    """Run configuration: disease, locations, output paths, quantile levels, sample output."""
+    """
+    Run configuration: disease, locations, output paths, quantile levels, sample output. q_levels/q_labels may be
+    empty for a samples-only run (models that support samples only).
+    """
 
     disease: Disease
     ref_date: datetime.date
@@ -77,9 +80,15 @@ class RunConfig:
 
     def validate(self):
         """
-        Raise if the sample output settings are invalid. Runs when the config is created and again when a model
-        runs, since fields (e.g. num_sample_forecasts, states, hsas) can be changed after construction.
+        Raise if the quantile or sample output settings are invalid. Runs when the config is created and again when a
+        model runs, since fields (e.g. num_sample_forecasts, states, hsas) can be changed after construction.
         """
+        if len(self.q_levels) != len(self.q_labels):
+            raise ValueError(f"q_levels and q_labels must have the same length, got {len(self.q_levels)} and "
+                             f"{len(self.q_labels)}.")
+        # q_levels may be empty for a samples-only run, but a run must output something
+        if not self.q_levels and self.num_sample_forecasts == 0:
+            raise ValueError("RunConfig requests no output: set q_levels/q_labels, num_sample_forecasts, or both.")
         if self.num_sample_forecasts < 0:
             raise ValueError(f"num_sample_forecasts must be at least 0, got {self.num_sample_forecasts}.")
         if self.num_sample_forecasts > 0 and self.sample_id_scheme == SampleIdScheme.STATE_ABBREVIATION:

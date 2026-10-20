@@ -66,36 +66,37 @@ class SARIXModel(IDModel):
 
         # posterior predictive draws, shape (num_samples * num_chains, n_locations, max_horizon)
         draws = np.asarray(sarix_fit.predictions[..., :, :, 0])
-        pred_qs = _np_percentile(
-            draws,
-            np.array(run_config.q_levels) * 100,
-            axis=0,
-        )
-
         df_data_last_obs = df.groupby(["unique_id", "agg_level"]).tail(1)
 
-        preds_df = pd.concat(
-            [
-                pd.DataFrame(pred_qs[i, :, :])
-                .set_axis(df_data_last_obs["unique_id"], axis="index")
-                .set_axis(np.arange(1, run_config.max_horizon + 1), axis="columns")
-                .assign(output_type_id=q_label)
-                for i, q_label in enumerate(run_config.q_labels)
-            ]
-        ).reset_index() \
-            .melt(["unique_id", "output_type_id"], var_name="horizon") \
-            .assign(output_type="quantile") \
-            .merge(df_data_last_obs, on="unique_id", how="left")
+        # quantile and/or sample blocks; RunConfig.validate() ensures at least one is requested
+        blocks = []
+        if run_config.q_levels:
+            pred_qs = _np_percentile(
+                draws,
+                np.array(run_config.q_levels) * 100,
+                axis=0,
+            )
+            blocks.append(pd.concat(
+                [
+                    pd.DataFrame(pred_qs[i, :, :])
+                    .set_axis(df_data_last_obs["unique_id"], axis="index")
+                    .set_axis(np.arange(1, run_config.max_horizon + 1), axis="columns")
+                    .assign(output_type_id=q_label)
+                    for i, q_label in enumerate(run_config.q_labels)
+                ]
+            ).reset_index()
+                .melt(["unique_id", "output_type_id"], var_name="horizon")
+                .assign(output_type="quantile")
+                .merge(df_data_last_obs, on="unique_id", how="left"))
 
         if run_config.num_sample_forecasts > 0:
             draw_inds = _select_draw_indices(draws.shape[0], run_config.num_sample_forecasts, ref_date_seed(run_config))
-            samples_df = _draws_to_samples_df(draws, df_data_last_obs["unique_id"].values, draw_inds) \
-                .assign(output_type="sample") \
-                .merge(df_data_last_obs, on="unique_id", how="left")
-            preds_df = pd.concat([preds_df, samples_df], ignore_index=True)
+            blocks.append(_draws_to_samples_df(draws, df_data_last_obs["unique_id"].values, draw_inds)
+                          .assign(output_type="sample")
+                          .merge(df_data_last_obs, on="unique_id", how="left"))
 
         # value is already in inc_trans_cs space (SARIX predicts inc_trans_cs directly)
-        return preds_df
+        return pd.concat(blocks, ignore_index=True)
 
 
     def _get_extra_sarix_params(self, df: pd.DataFrame) -> dict:
