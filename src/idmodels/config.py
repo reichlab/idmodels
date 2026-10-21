@@ -72,6 +72,8 @@ class RunConfig:
     # number of sample trajectories to output per location, in addition to quantiles; 0 disables sample output
     num_sample_forecasts: int = 0
     sample_id_scheme: SampleIdScheme = SampleIdScheme.STATE_ABBREVIATION
+    # drop (with a warning) locations missing a main-source value for the latest week
+    drop_incomplete_locations: bool = False
 
 
     def __post_init__(self):

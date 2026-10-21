@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vendored `data/state_abbreviations.csv` mapping state/national FIPS codes to postal abbreviations
 - `IDModel.supports_sample_forecasts` (`True` for `SARIXModel`): `IDModel.run()` raises `NotImplementedError` before loading any data when `num_sample_forecasts > 0` for a model that doesn't support samples, such as `GBQRModel`
 - Peak models (`PeakBaselineModel`, `PeakGBQRModel`) raise `NotImplementedError` when `num_sample_forecasts > 0`, since peak targets have no forecast horizons to form trajectories over
+- `RunConfig.drop_incomplete_locations` (default `False`): drop, with a warning, locations missing a main-source value for the latest week
 
 ### Changed
 - `IDModel._fit_and_predict` implementations now set `output_type` on each row (previously hardcoded to `"quantile"` in `_format_output`); sample rows carry a 0-based `sample_index` that `_format_output` turns into `output_type_id`
