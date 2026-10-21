@@ -18,6 +18,9 @@ DIRECTION_ANGLES = {"N": 0, "NE": 45, "E": 90, "SE": 135, "S": 180, "SW": 225, "
 # Cone width for each direction (degrees)
 CONE_WIDTH = 45.0  # ±22.5° around center
 
+# Location code of the national centroid in state_centroids.csv
+NATIONAL_LOCATION = "US"
+
 # Cache for loaded centroid data
 _CENTROID_CACHE: dict = {}
 

@@ -204,6 +204,7 @@ class GBQRModel(IDModel):
                     max_distance_km=self.model_config.wave_max_distance_km,
                     include_velocity=self.model_config.wave_include_velocity,
                     include_aggregate=self.model_config.wave_include_aggregate,
+                    group_columns=group_cols,
                 )
             )
 
