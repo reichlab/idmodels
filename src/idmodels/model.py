@@ -1,3 +1,4 @@
+import warnings
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -39,6 +40,8 @@ class IDModel(ABC):
         df = self._filter_sources_df(df, run_config)
         df = self._filter_locations(df, run_config)
         df["unique_id"] = df["agg_level"] + df["location"]
+        if run_config.drop_incomplete_locations:
+            df = self._drop_incomplete_locations(df)
 
         transform = self._build_transform()
         df = transform.apply(df)
@@ -131,6 +134,21 @@ class IDModel(ABC):
         ]
         df_hsas = df.loc[(df["location"].isin(run_config.hsas)) & (df["agg_level"] == "hsa")]
         return pd.concat([df_states, df_hsas], join="inner", axis=0)
+
+
+    def _drop_incomplete_locations(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop locations missing a main-source value for the latest week (e.g. SARIX can't fit a trailing NaN)."""
+        main = df.loc[df["source"] == self.model_config.main_source.value]
+        latest = main["wk_end_date"].max()
+        complete = set(main.loc[(main["wk_end_date"] == latest) & main["inc"].notna(), "unique_id"])
+        incomplete = sorted(set(main["unique_id"]) - complete)
+        if not incomplete:
+            return df
+        if not complete:
+            raise ValueError(f"Every location is missing a value for the latest week ({latest.date()}).")
+        warnings.warn(f"Dropping {len(incomplete)} location(s) missing a value for the latest week "
+                      f"({latest.date()}): {incomplete}", stacklevel=2)
+        return df.loc[~df["unique_id"].isin(incomplete)]
 
 
     def _invert_and_scale(self, preds_df: pd.DataFrame, transform: Transform, run_config: RunConfig) -> pd.DataFrame:

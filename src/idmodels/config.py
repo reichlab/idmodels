@@ -54,6 +54,8 @@ class RunConfig:
     hsas: list[str]
     q_levels: list[float]
     q_labels: list[str]
+    # drop (with a warning) locations missing a main-source value for the latest week
+    drop_incomplete_locations: bool = False
 
 
 @dataclass
