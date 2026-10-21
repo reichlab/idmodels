@@ -231,12 +231,15 @@ def test_sarix_samples_state_abbreviation(make_run_config):
     # only the quantiles are patched; samples come from the actual posterior draws
     with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()[:, 0:3, :]):
         SARIXModel(model_config).run(run_config)
-    # read as strings so quantile labels compare as written, despite sample labels sharing the column
+    # labels are read as strings so quantile labels compare as written, despite sample labels sharing the column.
+    # value stays numeric so assert_frame_equal compares it with a tolerance: an exact text comparison fails on
+    # last-digit floating point differences across platforms
+    dtype = {"location": str, "output_type_id": str}
     actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
-                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv", dtype=str)
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv", dtype=dtype)
     expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
                               f"UMass-{model_config.model_name}" /
-                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-state.csv", dtype=str)
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-state.csv", dtype=dtype)
 
     # quantile rows come first and match the quantile-only output
     n_quantile_rows = len(expected_df)
@@ -250,7 +253,7 @@ def test_sarix_samples_state_abbreviation(make_run_config):
     # each id is one trajectory: a single location, one row per horizon
     assert (sample_df.groupby("output_type_id")["location"].nunique() == 1).all()
     assert (sample_df.groupby("output_type_id")["horizon"].nunique() == run_config.max_horizon).all()
-    assert sample_df["value"].astype(float).between(0, 1).all()  # NSSP is output as a proportion
+    assert sample_df["value"].between(0, 1).all()  # NSSP is output as a proportion
 
 
 def test_sarix_samples_only_draw_number_with_hsas(make_run_config):
