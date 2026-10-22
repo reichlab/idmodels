@@ -120,6 +120,10 @@ class GBQRModelConfig(ModelConfig):
         # also warned at run time (GBQRModel._fit_and_predict), in case the config is changed after construction
         if self.fit_locations_separately and SourceType.SMH in [self.main_source] + self.supplementary_sources:
             warnings.warn(SMH_UNUSED_WHEN_FITTING_SEPARATELY, stacklevel=3)
+        # SMH's synthetic "syn-" locations have no centroids, so wave features can't be computed for them
+        if self.use_directional_waves and SourceType.SMH in [self.main_source] + self.supplementary_sources:
+            raise ValueError("use_directional_waves=True is not supported with SMH as a source: SMH's synthetic "
+                             "'syn-' locations have no centroids.")
 
 
 @dataclass

@@ -1,10 +1,13 @@
 """Unit tests for directional wave feature generation."""
 
+import time
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from idmodels.features import DirectionalWaveFeature
+from idmodels.spatial_utils import get_location_centroids
 
 
 def create_test_dataframe():
@@ -186,24 +189,130 @@ def test_create_directional_wave_features_invalid_direction():
                                ).apply(df, [])
 
 
-def test_create_directional_wave_features_multiple_agg_levels():
-    """Test that multiple agg_levels raise ValueError."""
+def test_non_state_rows_get_nan_and_national_is_not_a_neighbor():
+    """Only state rows are featurized; national rows get NaN and never feed state averages."""
     df = create_test_dataframe()
+    dates = df["wk_end_date"].unique()
+    national = pd.DataFrame({"location": "US",
+                             "wk_end_date": dates,
+                             "inc_trans_cs": 1e6,
+                             "agg_level": "national",
+                             "source": "nhsn"})
+    df = pd.concat([df, national], ignore_index=True)
 
-    # Add a row with different agg_level
-    df.loc[len(df)] = {"location": "01001",
-                       "wk_end_date": pd.Timestamp("2024-01-01"),
-                       "inc_trans_cs": 0.5,
-                       "agg_level": "county",
-                       "source": "nhsn"}
+    df_result, _ = DirectionalWaveFeature(directions=["N"],
+                                          temporal_lags=[1],
+                                          max_distance_km=5000,
+                                          include_velocity=True,
+                                          include_aggregate=True,
+                                          ).apply(df, [])
 
-    with pytest.raises(ValueError, match="Multiple aggregation levels"):
-        DirectionalWaveFeature(directions=["N"],
-                               temporal_lags=[],
-                               max_distance_km=5000,
-                               include_velocity=False,
-                               include_aggregate=False,
-                               ).apply(df, [])
+    is_national = df_result["agg_level"] == "national"
+    wave_cols = [c for c in df_result.columns if "wave" in c]
+    assert df_result.loc[is_national, wave_cols].isna().all().all()
+    # The huge national value must not leak into any state's neighbor average
+    assert (df_result.loc[~is_national, "inc_trans_cs_wave_avg"].dropna().abs() < 1e3).all()
+    assert df_result.loc[~is_national, "inc_trans_cs_wave_avg"].notna().any()
+
+
+def test_no_state_rows_raises():
+    """Data with no state rows (e.g. an HSA-only run) is a config mistake, not all-NaN features."""
+    df = create_test_dataframe().assign(agg_level="hsa")
+
+    with pytest.raises(ValueError, match="require state-level rows"):
+        DirectionalWaveFeature(directions=["N"], temporal_lags=[], max_distance_km=5000).apply(df, [])
+
+
+def test_smh_synthetic_locations_have_no_coordinates():
+    """SMH's 'syn-XX' locations are state-level but have no centroids (GBQRModelConfig rejects this combination)."""
+    df = create_test_dataframe().assign(location=lambda x: "syn-" + x["location"], source="smh")
+
+    with pytest.raises(ValueError, match="Missing coordinates"):
+        DirectionalWaveFeature(directions=["N"], temporal_lags=[], max_distance_km=5000).apply(df, [])
+
+
+def test_location_only_group_columns():
+    """group_columns=["location"] treats the whole frame as one series per location."""
+    df = create_test_dataframe().assign(inc_trans_cs=lambda x: x.groupby("location").cumcount().astype(float))
+
+    df_result, _ = DirectionalWaveFeature(directions=["N"],
+                                          temporal_lags=[1],
+                                          max_distance_km=5000,
+                                          include_velocity=False,
+                                          include_aggregate=True,
+                                          group_columns=["location"],
+                                          ).apply(df, [])
+
+    # Every location has the same value on a given date, so the neighbor average equals it
+    np.testing.assert_allclose(df_result["inc_trans_cs_wave_avg"], df_result["inc_trans_cs"])
+    lagged = df_result.dropna(subset=["inc_trans_cs_wave_avg_lag1"])
+    assert len(lagged) == 3 * 4
+    np.testing.assert_allclose(lagged["inc_trans_cs_wave_avg_lag1"], lagged["inc_trans_cs"] - 1)
+
+
+def test_group_columns_must_include_location():
+    with pytest.raises(ValueError, match="must include 'location'"):
+        DirectionalWaveFeature(directions=["N"], temporal_lags=[], max_distance_km=5000, group_columns=["source"])
+
+
+def test_sources_are_featurized_independently():
+    """Neighbor averages and lags must stay within a source, not mix e.g. NHSN into NSSP rows."""
+    dates = pd.date_range("2024-01-06", periods=4, freq="W-SAT")
+    df = pd.DataFrame([
+        {"source": src, "location": loc, "wk_end_date": d, "agg_level": "state", "inc_trans_cs": scale * (i + 1)}
+        for src, scale in [("nhsn", 1.0), ("nssp", 100.0)]
+        for loc in ["25", "33", "50", "09", "44"]  # New England states
+        for i, d in enumerate(dates)
+    ])
+
+    df_result, _ = DirectionalWaveFeature(directions=["N"],
+                                          temporal_lags=[1],
+                                          max_distance_km=1000,
+                                          include_velocity=False,
+                                          include_aggregate=True,
+                                          ).apply(df, [])
+
+    # Every location in a source has the same value on a given date, so the neighbor average equals it
+    np.testing.assert_allclose(df_result["inc_trans_cs_wave_avg"], df_result["inc_trans_cs"])
+    # lag1 is the previous week's value within the same source
+    lagged = df_result.dropna(subset=["inc_trans_cs_wave_avg_lag1"])
+    assert len(lagged) == 2 * 5 * 3
+    np.testing.assert_allclose(lagged["inc_trans_cs_wave_avg_lag1"],
+                               lagged["inc_trans_cs"] - np.where(lagged["source"] == "nhsn", 1.0, 100.0))
+
+
+def test_group_columns_separate_series_within_a_source():
+    """Extra group columns (e.g. SMH season/trajectory) define separate series within a source."""
+    df = pd.concat([create_test_dataframe().assign(season="a", inc_trans_cs=1.0),
+                    create_test_dataframe().assign(season="b", inc_trans_cs=5.0)], ignore_index=True)
+    feature = DirectionalWaveFeature(directions=["N"],
+                                     temporal_lags=[1],
+                                     max_distance_km=5000,
+                                     include_velocity=False,
+                                     include_aggregate=True,
+                                     group_columns=["source", "location", "season"])
+    df_result, _ = feature.apply(df, [])
+    np.testing.assert_allclose(df_result["inc_trans_cs_wave_avg"], df_result["inc_trans_cs"])
+    lagged = df_result.dropna(subset=["inc_trans_cs_wave_avg_lag1"])
+    np.testing.assert_allclose(lagged["inc_trans_cs_wave_avg_lag1"], lagged["inc_trans_cs"])
+
+    # Without season in group_columns the rows aren't unique per series
+    with pytest.raises(ValueError, match="duplicate rows"):
+        DirectionalWaveFeature(directions=["N"], temporal_lags=[], max_distance_km=5000).apply(df, [])
+
+
+def test_preserves_non_default_index_and_row_order():
+    """The caller's index and row order are returned unchanged, even when not sorted by location/date."""
+    df = create_test_dataframe().sample(frac=1, random_state=0)
+    df.index = df.index + 1000
+
+    df_result, _ = DirectionalWaveFeature(directions=["N"],
+                                          temporal_lags=[1],
+                                          max_distance_km=5000,
+                                          ).apply(df, [])
+
+    assert df_result.index.tolist() == df.index.tolist()
+    pd.testing.assert_frame_equal(df_result[df.columns], df)
 
 
 def test_create_directional_wave_features_missing_coordinates():
@@ -310,3 +419,41 @@ def test_create_directional_wave_features_no_neighbors():
     assert "inc_trans_cs_wave_N" in feat_names
     # Feature should exist but be NaN (no neighbors)
     assert pd.isna(df_result.loc[0, "inc_trans_cs_wave_N"])
+
+
+def test_create_directional_wave_features_realistic_scale_is_fast():
+    """Regression test: computing wave features over a realistic amount of training
+    history (all states, ~2 seasons of weekly data) must stay fast. The original
+    implementation scanned the full dataframe with a boolean mask for every
+    (row, neighbor, direction) combination, which took tens of minutes at this scale;
+    the vectorized implementation should take well under a second.
+    """
+    locations = [loc for loc in get_location_centroids(agg_level="state") if loc != "US"]
+    dates = pd.date_range("2023-10-01", periods=100, freq="W")
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame([
+        {
+            "location": loc,
+            "wk_end_date": date,
+            "inc_trans_cs": rng.normal(),
+            "agg_level": "state",
+            "source": "nhsn",
+        }
+        for loc in locations
+        for date in dates
+    ])
+
+    start = time.perf_counter()
+    df_result, feat_names = DirectionalWaveFeature(
+        directions=["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+        temporal_lags=[1, 2],
+        max_distance_km=1500,
+        include_velocity=True,
+        include_aggregate=True,
+    ).apply(df, [])
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 5.0, f"directional wave feature computation took {elapsed:.1f}s at realistic scale"
+    for feat in feat_names:
+        assert feat in df_result.columns
