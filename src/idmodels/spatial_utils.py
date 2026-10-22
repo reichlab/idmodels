@@ -240,6 +240,47 @@ def get_directional_neighbors(
     return neighbors
 
 
+def get_neighbors_within_distance(
+    origin_loc: str,
+    origin_coord: Tuple[float, float],
+    all_coords: Dict[str, Tuple[float, float]],
+    max_distance_km: float,
+) -> List[Tuple[str, float]]:
+    """
+    Find neighbors of origin location in any direction.
+
+    Parameters
+    ----------
+    origin_loc : str
+        Location code of origin
+    origin_coord : tuple
+        (latitude, longitude) of origin location
+    all_coords : dict
+        Mapping from location codes to (lat, lon) tuples
+    max_distance_km : float
+        Maximum distance in kilometers to consider as neighbor
+
+    Returns
+    -------
+    list of tuples
+        List of (location_code, distance) for neighbors within max_distance_km,
+        sorted by distance (nearest first)
+    """
+    neighbors = []
+
+    for loc_code, loc_coord in all_coords.items():
+        if loc_code == origin_loc:
+            continue
+
+        distance = haversine_distance(origin_coord, loc_coord)
+        if distance <= max_distance_km:
+            neighbors.append((loc_code, distance))
+
+    neighbors.sort(key=lambda x: x[1])
+
+    return neighbors
+
+
 def validate_wave_directions(wave_directions: List[str]) -> None:
     """
     Validate that all directions are recognized.

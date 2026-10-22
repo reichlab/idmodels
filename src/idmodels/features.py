@@ -11,7 +11,7 @@ from idmodels.spatial_utils import (
     NATIONAL_LOCATION,
     get_directional_neighbors,
     get_location_centroids,
-    haversine_distance,
+    get_neighbors_within_distance,
     validate_wave_directions,
 )
 
@@ -253,7 +253,8 @@ class DirectionalWaveFeature(Feature):
 
     Known limitation: only state-level data is supported. Features are computed for
     rows with ``agg_level == "state"``; all other rows (e.g. national, HSA) get NaN,
-    and the national ("US") centroid is never used as a neighbor.
+    and the national ("US") centroid is never used as a neighbor. Data with no state
+    rows raises ValueError.
 
     Parameters
     ----------
@@ -310,6 +311,9 @@ class DirectionalWaveFeature(Feature):
         orig_index = df.index
         df = df.reset_index(drop=True)
         df_state = df.loc[df["agg_level"] == "state"]
+        if df_state.empty:
+            raise ValueError(f"Directional wave features require state-level rows; found only agg_level values "
+                             f"{sorted(df['agg_level'].unique())}.")
 
         locations = sorted(df_state["location"].unique())
         missing = set(locations) - set(location_coords.keys())
@@ -348,9 +352,12 @@ class DirectionalWaveFeature(Feature):
             )
         if self.include_aggregate:
             weights["inc_trans_cs_wave_avg"] = _weight_matrix(
-                lambda loc: [(other, dist) for other in locations if other != loc
-                             for dist in [haversine_distance(location_coords[loc], location_coords[other])]
-                             if dist <= self.max_distance_km]
+                lambda loc: get_neighbors_within_distance(
+                    origin_loc=loc,
+                    origin_coord=location_coords[loc],
+                    all_coords=location_coords,
+                    max_distance_km=self.max_distance_km,
+                )
             )
         base_feat_names = list(weights.keys())
 
