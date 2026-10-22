@@ -1,4 +1,3 @@
-import calendar
 import warnings
 
 import lightgbm as lgb
@@ -26,7 +25,7 @@ from idmodels.features import (
     TaylorFeature,
 )
 from idmodels.model import IDModel
-from idmodels.utils import build_save_path
+from idmodels.utils import build_save_path, ref_date_seed
 
 
 def _smh_otid(season: pd.Series) -> pd.Series:
@@ -35,11 +34,6 @@ def _smh_otid(season: pd.Series) -> pd.Series:
     "{season}{scenario_letter}-{output_type_id}" (see iddata.sources.smh.SMHDataSource.load).
     """
     return season.str.split("-", n=1).str[1]
-
-
-def _ref_date_seed(run_config: RunConfig) -> int:
-    """Seed for random number generation, based on reference date, so reruns for a date are reproducible."""
-    return int(calendar.timegm(run_config.ref_date.timetuple()))
 
 
 class GBQRModel(IDModel):
@@ -82,7 +76,7 @@ class GBQRModel(IDModel):
 
         # default to the same ref_date-based seed as the rest of GBQR, so a rerun for the same date samples the
         # same trajectories
-        seed = model_config.smh_otid_seed if model_config.smh_otid_seed is not None else _ref_date_seed(run_config)
+        seed = model_config.smh_otid_seed if model_config.smh_otid_seed is not None else ref_date_seed(run_config)
         rng = np.random.default_rng(seed)
 
         sampled_frames = []
@@ -253,6 +247,7 @@ class GBQRModel(IDModel):
         else:
             preds_df = self._train_gbq_and_predict(run_config, df_train, df_test, feat_names)
 
+        preds_df["output_type"] = "quantile"
         return preds_df
 
     def _train_gbq_and_predict(self, run_config, df_train, df_test, feat_names, unique_id=None):
@@ -302,7 +297,7 @@ class GBQRModel(IDModel):
         return preds_df
 
     def _get_test_quantile_predictions(self, run_config, df_train, x_train, y_train, x_test):
-        rng = np.random.default_rng(seed=_ref_date_seed(run_config))
+        rng = np.random.default_rng(seed=ref_date_seed(run_config))
         # seeds for lgb model fits, one per combination of bag and quantile level
         lgb_seeds = rng.integers(1e8, size=(self.model_config.num_bags, len(run_config.q_levels)))
 

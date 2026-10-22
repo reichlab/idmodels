@@ -7,10 +7,13 @@ from sarix import sarix
 from idmodels.config import RunConfig, SARIXFourierModelConfig, SARIXModelConfig, SourceType
 from idmodels.features import FeaturePipeline
 from idmodels.model import IDModel
+from idmodels.utils import ref_date_seed
 
 
 class SARIXModel(IDModel):
     """SARIX (Bayesian ARIMA with exogenous covariates) forecast model."""
+
+    supports_sample_forecasts = True
 
 
     def __init__(self, model_config: SARIXModelConfig):
@@ -35,7 +38,7 @@ class SARIXModel(IDModel):
 
 
     def _fit_and_predict(self, df: pd.DataFrame, feat_names: list[str], run_config: RunConfig) -> pd.DataFrame:
-        """Fit SARIX and return quantile predictions in long format (inc_trans_cs space)."""
+        """Fit SARIX and return quantile (and optionally sample) predictions in long format (inc_trans_cs space)."""
         xy_colnames = self.model_config.x + ["inc_trans_cs"]
 
         # missing values are interpolated when possible
@@ -61,28 +64,39 @@ class SARIXModel(IDModel):
                                 num_chains=self.model_config.num_chains,
                                 **extra_params)
 
-        pred_qs = _np_percentile(
-            sarix_fit.predictions[..., :, :, 0],
-            np.array(run_config.q_levels) * 100,
-            axis=0,
-        )
-
+        # posterior predictive draws, shape (num_samples * num_chains, n_locations, max_horizon)
+        draws = np.asarray(sarix_fit.predictions[..., :, :, 0])
         df_data_last_obs = df.groupby(["unique_id", "agg_level"]).tail(1)
 
-        preds_df = pd.concat(
-            [
-                pd.DataFrame(pred_qs[i, :, :])
-                .set_axis(df_data_last_obs["unique_id"], axis="index")
-                .set_axis(np.arange(1, run_config.max_horizon + 1), axis="columns")
-                .assign(output_type_id=q_label)
-                for i, q_label in enumerate(run_config.q_labels)
-            ]
-        ).reset_index() \
-            .melt(["unique_id", "output_type_id"], var_name="horizon") \
-            .merge(df_data_last_obs, on="unique_id", how="left")
+        # quantile and/or sample blocks; RunConfig.validate() ensures at least one is requested
+        blocks = []
+        if run_config.q_levels:
+            pred_qs = _np_percentile(
+                draws,
+                np.array(run_config.q_levels) * 100,
+                axis=0,
+            )
+            blocks.append(pd.concat(
+                [
+                    pd.DataFrame(pred_qs[i, :, :])
+                    .set_axis(df_data_last_obs["unique_id"], axis="index")
+                    .set_axis(np.arange(1, run_config.max_horizon + 1), axis="columns")
+                    .assign(output_type_id=q_label)
+                    for i, q_label in enumerate(run_config.q_labels)
+                ]
+            ).reset_index()
+                .melt(["unique_id", "output_type_id"], var_name="horizon")
+                .assign(output_type="quantile")
+                .merge(df_data_last_obs, on="unique_id", how="left"))
+
+        if run_config.num_sample_forecasts > 0:
+            draw_inds = _select_draw_indices(draws.shape[0], run_config.num_sample_forecasts, ref_date_seed(run_config))
+            blocks.append(_draws_to_samples_df(draws, df_data_last_obs["unique_id"].values, draw_inds)
+                          .assign(output_type="sample")
+                          .merge(df_data_last_obs, on="unique_id", how="left"))
 
         # value is already in inc_trans_cs space (SARIX predicts inc_trans_cs directly)
-        return preds_df
+        return pd.concat(blocks, ignore_index=True)
 
 
     def _get_extra_sarix_params(self, df: pd.DataFrame) -> dict:
@@ -120,6 +134,33 @@ class SARIXFourierModel(SARIXModel):
 def _np_percentile(predictions, q_levels, axis):
     """Helper to ease patching from unit tests."""
     return np.percentile(predictions, q_levels, axis)
+
+
+def _select_draw_indices(num_draws: int, num_sample_forecasts: int, seed: int) -> np.ndarray:
+    """
+    Choose which posterior predictive draws to output as samples, without replacement. Chosen once
+    for all locations, so sample k in every location comes from the same posterior draw.
+    """
+    if num_sample_forecasts > num_draws:
+        raise ValueError(f"num_sample_forecasts ({num_sample_forecasts}) exceeds the {num_draws} available SARIX "
+                         f"posterior draws (num_samples * num_chains).")
+    return np.random.default_rng(seed=seed).choice(num_draws, size=num_sample_forecasts, replace=False)
+
+
+def _draws_to_samples_df(draws: np.ndarray, unique_ids: np.ndarray, draw_inds: np.ndarray) -> pd.DataFrame:
+    """
+    Reshape the selected draws (draws has shape (num_draws, n_locations, max_horizon), with locations in
+    unique_ids order) into long format with columns unique_id, horizon (1-based), sample_index, value.
+    sample_index is the 0-based position of each draw in draw_inds.
+    """
+    sampled = draws[draw_inds]
+    n_samples, n_locations, max_horizon = sampled.shape
+    return pd.DataFrame({
+        "unique_id": np.tile(np.repeat(unique_ids, max_horizon), n_samples),
+        "horizon": np.tile(np.arange(1, max_horizon + 1), n_samples * n_locations),
+        "sample_index": np.repeat(np.arange(n_samples), n_locations * max_horizon),
+        "value": sampled.reshape(-1),
+    })
 
 
 def _interpolate_by_location(df: pd.DataFrame, xy_colnames: list[str]) -> pd.DataFrame:

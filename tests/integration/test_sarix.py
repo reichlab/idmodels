@@ -10,6 +10,7 @@ from pandas.testing import assert_frame_equal
 from idmodels.config import (
     PoolingStrategy,
     PowerTransform,
+    SampleIdScheme,
     SARIXFourierModelConfig,
     SARIXModelConfig,
     SourceType,
@@ -211,6 +212,82 @@ def test_sarix_fourier_wrong_config_type():
 
     with pytest.raises(TypeError, match="SARIXFourierModel requires a SARIXFourierModelConfig"):
         SARIXFourierModel(model_config)
+
+
+def _read_output(run_config, model_config):
+    return pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                       f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv",
+                       dtype={"location": str, "output_type_id": str})
+
+
+def test_sarix_samples_state_abbreviation(make_run_config):
+    # same setup as test_sarix_nssp's states-only case, so the quantile rows can be checked against its expected output
+    date = datetime.date.fromisoformat("2025-11-22")
+    fips_codes = ["US", "01", "25"]
+    model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
+                                                  sigma_pooling=PoolingStrategy.NONE, num=200)
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[], num_sample_forecasts=5)
+
+    # only the quantiles are patched; samples come from the actual posterior draws
+    with patch("idmodels.sarix._np_percentile", return_value=_np_percentile_val()[:, 0:3, :]):
+        SARIXModel(model_config).run(run_config)
+    # labels are read as strings so quantile labels compare as written, despite sample labels sharing the column.
+    # value stays numeric so assert_frame_equal compares it with a tolerance: an exact text comparison fails on
+    # last-digit floating point differences across platforms
+    dtype = {"location": str, "output_type_id": str}
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv", dtype=dtype)
+    expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
+                              f"UMass-{model_config.model_name}" /
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-state.csv", dtype=dtype)
+
+    # quantile rows come first and match the quantile-only output
+    n_quantile_rows = len(expected_df)
+    assert_frame_equal(actual_df.iloc[:n_quantile_rows], expected_df)
+
+    sample_df = actual_df.iloc[n_quantile_rows:]
+    assert (sample_df["output_type"] == "sample").all()
+    assert len(sample_df) == len(fips_codes) * run_config.max_horizon * 5
+    expected_ids = {f"{abbr}{i:02d}" for abbr in ["US", "AL", "MA"] for i in range(5)}
+    assert set(sample_df["output_type_id"]) == expected_ids
+    # each id is one trajectory: a single location, one row per horizon
+    assert (sample_df.groupby("output_type_id")["location"].nunique() == 1).all()
+    assert (sample_df.groupby("output_type_id")["horizon"].nunique() == run_config.max_horizon).all()
+    assert sample_df["value"].between(0, 1).all()  # NSSP is output as a proportion
+
+
+def test_sarix_samples_only_draw_number_with_hsas(make_run_config):
+    date = datetime.date.fromisoformat("2025-11-22")
+    model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
+                                                  sigma_pooling=PoolingStrategy.NONE, num=50)
+    run_config = make_run_config(ref_date=date, states=["US", "01"], hsas=["1", "25"], num_sample_forecasts=12,
+                                 sample_id_scheme=SampleIdScheme.DRAW_NUMBER)
+    run_config.q_levels, run_config.q_labels = [], []  # samples only
+    SARIXModel(model_config).run(run_config)
+    actual_df = _read_output(run_config, model_config)
+
+    assert (actual_df["output_type"] == "sample").all()
+    sample_df = actual_df
+    assert set(sample_df["agg_level"]) == {"national", "state", "hsa"}
+    assert len(sample_df) == 4 * run_config.max_horizon * 12
+    # every location gets ids 1..12, in numeric order
+    assert (sample_df.groupby(["agg_level", "location"])["output_type_id"]
+            .apply(lambda ids: set(ids) == {str(i) for i in range(1, 13)})).all()
+    assert sample_df["output_type_id"].astype(int).is_monotonic_increasing
+    assert sample_df["value"].notna().all()
+    assert sample_df["value"].between(0, 1).all()  # NSSP is output as a proportion
+
+
+def test_sarix_samples_exceeding_posterior_draws_raises(make_run_config):
+    model_config = create_test_sarix_model_config(main_source=SourceType.NHSN, theta_pooling=PoolingStrategy.SHARED,
+                                                  sigma_pooling=PoolingStrategy.NONE, num=20)
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US", "01"], hsas=[],
+                                 num_sample_forecasts=21)
+
+    with pytest.raises(ValueError, match="exceeds the 20 available SARIX posterior draws"):
+        SARIXModel(model_config).run(run_config)
+    assert not (run_config.output_root / f"UMass-{model_config.model_name}" /
+                f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv").exists()
 
 
 def test_sarix_invalid_main_source_raises(make_run_config):

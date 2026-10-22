@@ -1,8 +1,21 @@
-# Geographic Data for Spatial Features
+# Geographic Reference Data
 
-This directory contains geographic reference data used for computing directional wave features.
+This directory contains geographic reference data used for computing directional wave features and
+for labeling sample forecasts.
 
 ## Files
+
+### `state_abbreviations.csv`
+
+Two-letter postal abbreviations for US states, territories, and national level, used to build
+sample `output_type_id`s (e.g. `US00`, `AL01`) under `SampleIdScheme.STATE_ABBREVIATION`.
+
+**Columns:**
+- `fips`: FIPS code (2-digit for states, 'US' for national)
+- `abbreviation`: USPS two-letter abbreviation ('US' for national)
+
+**Coverage:** the same locations as `state_centroids.csv` (50 US states, District of Columbia,
+Puerto Rico, and 'US'); a unit test checks the two files' `fips` sets match.
 
 ### `state_centroids.csv`
 

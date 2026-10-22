@@ -1,3 +1,4 @@
+import warnings
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -18,7 +19,7 @@ from idmodels.transforms import (
     SourceScaleTransform,
     Transform,
 )
-from idmodels.utils import build_save_path
+from idmodels.utils import build_sample_output_type_ids, build_save_path
 
 
 class IDModel(ABC):
@@ -27,6 +28,9 @@ class IDModel(ABC):
     _build_feature_pipeline(), and _fit_and_predict(). run() orchestrates the full workflow.
     """
 
+    # whether _fit_and_predict can produce sample rows; models that can't refuse runs that request samples
+    supports_sample_forecasts: bool = False
+
 
     def __init__(self, model_config: ModelConfig):
         self.model_config = model_config
@@ -34,11 +38,19 @@ class IDModel(ABC):
 
     def run(self, run_config: RunConfig) -> None:
         """Load data, generate predictions, and save to file."""
+        run_config.validate()
+        # raise before loading any data, rather than silently write a file without the requested samples
+        if run_config.num_sample_forecasts > 0 and not self.supports_sample_forecasts:
+            raise NotImplementedError(f"{type(self).__name__} does not support sample forecasts yet; "
+                                      f"set num_sample_forecasts=0.")
+
         sources = self._build_sources(run_config)
         df = DiseaseDataLoader().load(sources=sources, as_of=run_config.ref_date, ancillary=[PopulationData()])
         df = self._filter_sources_df(df, run_config)
         df = self._filter_locations(df, run_config)
         df["unique_id"] = df["agg_level"] + df["location"]
+        if run_config.drop_incomplete_locations:
+            df = self._drop_incomplete_locations(df)
 
         transform = self._build_transform()
         df = transform.apply(df)
@@ -77,12 +89,16 @@ class IDModel(ABC):
     @abstractmethod
     def _fit_and_predict(self, df: pd.DataFrame, feat_names: list[str], run_config: RunConfig) -> pd.DataFrame:
         """
-        Fit model and generate quantile predictions.
+        Fit model and generate quantile predictions, plus sample predictions if
+        run_config.num_sample_forecasts > 0.
 
         Returns long-format DataFrame with columns:
             source, agg_level, location, wk_end_date, pop, horizon,
             inc_trans_cs, inc_trans_center_factor, inc_trans_scale_factor,
-            output_type_id, value (in inc_trans_cs space)
+            output_type ("quantile" or "sample"), output_type_id, value (in inc_trans_cs space)
+        Quantile rows' output_type_id is the quantile label. Sample rows instead carry an integer
+        sample_index (0-based draw number, consistent across locations) and are labeled later, by
+        _format_output, according to run_config.sample_id_scheme.
         """
         ...
 
@@ -133,6 +149,21 @@ class IDModel(ABC):
         return pd.concat([df_states, df_hsas], join="inner", axis=0)
 
 
+    def _drop_incomplete_locations(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop locations missing a main-source value for the latest week (e.g. SARIX can't fit a trailing NaN)."""
+        main = df.loc[df["source"] == self.model_config.main_source.value]
+        latest = main["wk_end_date"].max()
+        complete = set(main.loc[(main["wk_end_date"] == latest) & main["inc"].notna(), "unique_id"])
+        incomplete = sorted(set(main["unique_id"]) - complete)
+        if not incomplete:
+            return df
+        if not complete:
+            raise ValueError(f"Every location is missing a value for the latest week ({latest.date()}).")
+        warnings.warn(f"Dropping {len(incomplete)} location(s) missing a value for the latest week "
+                      f"({latest.date()}): {incomplete}", stacklevel=2)
+        return df.loc[~df["unique_id"].isin(incomplete)]
+
+
     def _invert_and_scale(self, preds_df: pd.DataFrame, transform: Transform, run_config: RunConfig) -> pd.DataFrame:
         """Inverse transform predictions then convert to original units."""
         preds_df["value"] = transform.invert(preds_df["value"].values, context=preds_df)
@@ -161,7 +192,6 @@ class IDModel(ABC):
         preds_df["horizon"] = (
                 pd.to_timedelta(preds_df["target_end_date"].dt.date - run_config.ref_date).dt.days / 7
         ).astype(int)
-        preds_df["output_type"] = "quantile"
         preds_df["target"] = target_name
         preds_df.drop(columns="wk_end_date", inplace=True)
 
@@ -175,10 +205,27 @@ class IDModel(ABC):
         if len(preds_df["geo_level"].unique()) > 1:
             req_cols = ["agg_level"] + req_cols
 
-        return preds_df.sort_values(
-            ["output_type_id", "horizon", "location", "agg_level"],
-            ascending=[True, True, True, False],
-        ).reset_index(drop=True)[req_cols]
+        # quantile rows first, then sample rows. Samples sort by their numeric index rather than their
+        # label, since DRAW_NUMBER labels aren't zero-padded ("10" sorts before "2" as a string)
+        sort_cols = ["horizon", "location", "agg_level"]
+        ascending = [True, True, False]
+        # either block may be empty: a run can be quantiles only or samples only (and samples-only rows have no
+        # output_type_id column until they are labeled here)
+        is_sample = preds_df["output_type"] == "sample"
+        blocks = []
+        # an empty preds_df passes through as-is, for _raise_if_incomplete() to report
+        if (~is_sample).any() or preds_df.empty:
+            blocks.append(preds_df.loc[~is_sample].sort_values(["output_type_id"] + sort_cols,
+                                                               ascending=[True] + ascending))
+        if is_sample.any():
+            samples_df = preds_df.loc[is_sample].copy()
+            samples_df["sample_index"] = samples_df["sample_index"].astype(int)
+            samples_df["output_type_id"] = build_sample_output_type_ids(samples_df["location"],
+                                                                        samples_df["sample_index"],
+                                                                        run_config.sample_id_scheme)
+            blocks.append(samples_df.sort_values(["sample_index"] + sort_cols, ascending=[True] + ascending))
+
+        return pd.concat(blocks).reset_index(drop=True)[req_cols]
 
 
     def _raise_if_incomplete(self, preds_df: pd.DataFrame, run_config: RunConfig, save_path) -> None:
