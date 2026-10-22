@@ -12,18 +12,31 @@ aioitertools==0.12.0
     # via aiobotocore
 aiosignal==1.3.1
     # via aiohttp
+arviz==1.3.0
+    # via pymc
+arviz-base==1.3.1
+    # via
+    #   arviz
+    #   arviz-plots
+    #   arviz-stats
+arviz-plots==1.3.2
+    # via arviz
+arviz-stats==1.3.3
+    # via
+    #   arviz
+    #   arviz-plots
 attrs==24.2.0
     # via
     #   aiohttp
     #   pymmwr
 botocore==1.35.36
     # via aiobotocore
+cachetools==6.2.6
+    # via pymc
 cfgv==3.4.0
     # via pre-commit
-colorama==0.4.6
-    # via
-    #   pytest
-    #   tqdm
+cloudpickle==3.1.2
+    # via pymc
 contourpy==1.3.0
     # via matplotlib
 coverage==7.6.4
@@ -33,7 +46,9 @@ cycler==0.12.1
 distlib==0.3.9
     # via virtualenv
 filelock==3.16.1
-    # via virtualenv
+    # via
+    #   pytensor
+    #   virtualenv
 fonttools==4.54.1
     # via matplotlib
 frozenlist==1.5.0
@@ -66,8 +81,12 @@ joblib==1.4.2
     #   scikit-learn
 kiwisolver==1.4.7
     # via matplotlib
+lazy-loader==0.6
+    # via arviz-base
 lightgbm==4.5.0
     # via idmodels (pyproject.toml)
+llvmlite==0.50.0
+    # via numba
 markdown-it-py==3.0.0
     # via rich
 matplotlib==3.9.2
@@ -86,9 +105,13 @@ multipledispatch==1.0.0
     # via numpyro
 nodeenv==1.9.1
     # via pre-commit
+numba==0.68.0
+    # via pytensor
 numpy==2.1.3
     # via
     #   idmodels (pyproject.toml)
+    #   arviz-base
+    #   arviz-stats
     #   contourpy
     #   iddata
     #   jax
@@ -96,25 +119,34 @@ numpy==2.1.3
     #   lightgbm
     #   matplotlib
     #   ml-dtypes
+    #   numba
     #   numpyro
     #   pandas
+    #   pymc
+    #   pytensor
     #   sarix
     #   scikit-learn
     #   scipy
     #   timeseriesutils
+    #   xarray
+    #   xarray-einstats
 numpyro==0.19.0
     # via sarix
 opt-einsum==3.4.0
     # via jax
 packaging==24.1
     # via
+    #   lazy-loader
     #   matplotlib
     #   pytest
+    #   xarray
 pandas==2.2.3
     # via
     #   idmodels (pyproject.toml)
     #   iddata
+    #   pymc
     #   timeseriesutils
+    #   xarray
 pillow==11.0.0
     # via matplotlib
 platformdirs==4.3.6
@@ -129,10 +161,16 @@ pyarrow==25.0.1
     # via iddata
 pygments==2.18.0
     # via rich
+pymc==6.3.2
+    # via idmodels (pyproject.toml)
 pymmwr==0.2.2
     # via iddata
 pyparsing==3.2.0
     # via matplotlib
+pytensor==3.3.4
+    # via
+    #   idmodels (pyproject.toml)
+    #   pymc
 pytest==8.3.3
     # via idmodels (pyproject.toml)
 python-dateutil==2.9.0.post0
@@ -145,7 +183,9 @@ pytz==2024.2
 pyyaml==6.0.2
     # via pre-commit
 rich==13.9.4
-    # via iddata
+    # via
+    #   iddata
+    #   pymc
 ruff==0.7.2
     # via idmodels (pyproject.toml)
 s3fs==2024.10.0
@@ -158,15 +198,23 @@ scikit-learn==1.5.2
     # via idmodels (pyproject.toml)
 scipy==1.14.1
     # via
+    #   arviz-stats
     #   jax
     #   jaxlib
     #   lightgbm
+    #   pymc
+    #   pytensor
     #   scikit-learn
     #   timeseriesutils
+    #   xarray-einstats
+setuptools==84.2.0
+    # via pytensor
 six==1.16.0
     # via python-dateutil
 threadpoolctl==3.5.0
-    # via scikit-learn
+    # via
+    #   pymc
+    #   scikit-learn
 timeseriesutils @ git+https://github.com/reichlab/timeseriesutils@d25f33db30a8d5252329269ec9d205984f980f6c
     # via idmodels (pyproject.toml)
 toml==0.10.2
@@ -175,6 +223,10 @@ tqdm==4.67.0
     # via
     #   idmodels (pyproject.toml)
     #   numpyro
+typing-extensions==4.16.0
+    # via
+    #   arviz-base
+    #   pymc
 tzdata==2024.2
     # via pandas
 urllib3==2.2.3
@@ -183,6 +235,13 @@ virtualenv==20.27.1
     # via pre-commit
 wrapt==1.16.0
     # via aiobotocore
+xarray==2026.2.0
+    # via
+    #   arviz-base
+    #   arviz-stats
+    #   xarray-einstats
+xarray-einstats==0.11.0
+    # via arviz-stats
 xlrd==2.0.2
     # via iddata
 yarl==1.17.1

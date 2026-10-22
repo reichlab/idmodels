@@ -2,6 +2,7 @@ from iddata.enums import Disease, SourceType
 
 from idmodels.config import (
     GBQRModelConfig,
+    InnovationDist,
     PeakBaselineModelConfig,
     PeakGBQRModelConfig,
     PoolingStrategy,
@@ -9,6 +10,8 @@ from idmodels.config import (
     RunConfig,
     SARIXFourierModelConfig,
     SARIXModelConfig,
+    WISARModelConfig,
+    WISARObjective,
 )
 from idmodels.gbqr import GBQRModel
 from idmodels.peak import PeakBaselineModel, PeakGBQRModel
@@ -18,6 +21,7 @@ __all__ = [
     "Disease",
     "GBQRModel",
     "GBQRModelConfig",
+    "InnovationDist",
     "PeakBaselineModel",
     "PeakBaselineModelConfig",
     "PeakGBQRModel",
@@ -30,6 +34,9 @@ __all__ = [
     "SARIXModel",
     "SARIXModelConfig",
     "SourceType",
+    "WISARModelConfig",
+    "WISARObjective",
 ]
+# WISARModel is not imported here: it needs the optional `wisar` extra. Use `from idmodels.wisar import WISARModel`.
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
