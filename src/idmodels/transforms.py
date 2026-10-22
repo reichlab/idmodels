@@ -130,6 +130,31 @@ class CenterScaleTransform(Transform):
                 context["inc_trans_scale_factor"].values + 0.01)
 
 
+class WindowCenterScaleTransform(Transform):
+    """
+    Like CenterScaleTransform, but the 95th percentile and mean are computed over every row per (source, location)
+    rather than in-season weeks only, and the scale factor has no +0.01 term:
+        inc_trans_cs = inc_trans / q95 - mean(inc_trans / q95)
+    Callers restrict df to the training window first, so the factors are computed over exactly that window.
+
+    Output column: inc_trans_cs
+    Factor columns: inc_trans_scale_factor, inc_trans_center_factor
+    """
+
+
+    def apply(self, df: pd.DataFrame) -> pd.DataFrame:
+        grouped = df.groupby(["source", "location"])["inc_trans"]
+        df["inc_trans_scale_factor"] = grouped.transform(lambda x: x.quantile(0.95))
+        df["inc_trans_cs"] = df["inc_trans"] / df["inc_trans_scale_factor"]
+        df["inc_trans_center_factor"] = df.groupby(["source", "location"])["inc_trans_cs"].transform("mean")
+        df["inc_trans_cs"] = df["inc_trans_cs"] - df["inc_trans_center_factor"]
+        return df
+
+
+    def invert(self, values: np.ndarray, context: pd.DataFrame) -> np.ndarray:
+        return (values + context["inc_trans_center_factor"].values) * context["inc_trans_scale_factor"].values
+
+
 class ComposedTransform(Transform):
     """Chains multiple transforms; apply() in order, invert() in reverse."""
 

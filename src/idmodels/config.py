@@ -27,6 +27,20 @@ class PoolingStrategy(str, Enum):
     SHARED = "shared"
 
 
+class WISARObjective(str, Enum):
+    WIS = "wis"
+    LIKELIHOOD = "likelihood"
+
+
+class InnovationDist(str, Enum):
+    GAUSSIAN = "gaussian"
+    STUDENT_T = "studentt"
+
+
+FLUSIGHT_Q_LEVELS = [0.01, 0.025, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70,
+                     0.75, 0.80, 0.85, 0.90, 0.95, 0.975, 0.99]
+
+
 @dataclass
 class ModelConfig(ABC):
     """Abstract base for model configuration."""
@@ -184,3 +198,37 @@ class PeakGBQRModelConfig(PeakModelConfig):
     n_estimators: int = 100
     learning_rate: float = 0.05
     min_child_samples: int = 50
+
+
+@dataclass
+class WISARModelConfig(ModelConfig):
+    """
+    Pooled AR(p) + Fourier seasonality model fit with PyMC, optionally under a WIS-loss Gibbs posterior. Defaults
+    reproduce the WISAR6_fourthroot_adaptive_t model, except train_start (see below). Requires the `wisar` extra
+    (pymc, pytensor).
+    """
+
+    objective: WISARObjective = WISARObjective.WIS
+    p: int = 6
+    fourier_K: int = 2
+    theta_pooling: PoolingStrategy = PoolingStrategy.SHARED
+    fourier_pooling: PoolingStrategy = PoolingStrategy.SHARED
+    innovation_dist: InnovationDist = InnovationDist.STUDENT_T
+    t_dof: float = 5.0  # fixed, not sampled: no gradient through the Student-t icdf w.r.t. degrees of freedom
+    sigma_prior_scale: float = 1.0
+    theta_sd_prior_scale: float = 1.0
+    fourier_beta_sd_prior_scale: float = 1.0
+    # quantile levels the WIS loss is evaluated at; part of the fitting objective, independent of RunConfig.q_levels
+    wis_q_levels: list[float] = field(default_factory=lambda: list(FLUSIGHT_Q_LEVELS))
+    # first week of training data; also the window over which the center/scale factors are computed. iddata's NHSN
+    # series starts 2022-08-06 (WISAR6_fourthroot_adaptive_t was developed on hub target data starting 2022-02-05).
+    train_start: datetime.date = datetime.date(2022, 8, 6)
+    num_warmup: int = 2000
+    num_samples: int = 2000
+    num_chains: int = 2
+    num_cores: int = 1
+    target_accept: float = 0.99
+    n_param_draws: int = 200
+    n_innov_per_param: int = 5
+    seed_fit: int = 9001
+    seed_forecast: int = 9002

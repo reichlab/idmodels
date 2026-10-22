@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0]
+
+### Added
+- `WISARModel` (`idmodels.wisar`) and `WISARModelConfig`: a pooled AR(p) + Fourier seasonality model fit with PyMC under a WIS-loss Gibbs posterior (or a likelihood), with Gaussian or Student-t innovations. Defaults reproduce the WISAR6_fourthroot_adaptive_t model developed in forecast-sandbox-2025-2026, except that training starts 2022-08-06 (where iddata's NHSN series begins) rather than 2022-02-05. Requires the new optional `wisar` extra (`pip install "idmodels[wisar]"`); `WISARModel` is not imported by `idmodels/__init__.py` so the base install does not need PyMC
+- `WindowCenterScaleTransform`: center/scale by the 95th percentile and mean over all rows per (source, location), rather than in-season weeks only
+- `WISARObjective` and `InnovationDist` enums, and a `FLUSIGHT_Q_LEVELS` constant, in `idmodels.config`
+- `pymc` and `pytensor` added to the `dev` extra so CI runs the WISAR tests
+- `docs/wisar_model.md`
+
 ## [2.2.0] - 2026-10-19
 
 ### Added

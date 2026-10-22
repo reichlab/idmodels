@@ -24,9 +24,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# WISARModel (idmodels.wisar): pip install "idmodels[wisar]"
+wisar = [
+    "pymc",
+    "pytensor"
+]
 dev = [
     "coverage",
     "pre-commit",
+    "pymc",
+    "pytensor",
     "pytest",
     "ruff"
 ]

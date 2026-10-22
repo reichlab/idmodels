@@ -1,9 +1,11 @@
 # idmodels
 
-A Python module for modeling infectious disease.  Currently supports two classes of models:
+A Python module for modeling infectious disease.  Currently supports these classes of models:
 
  - gradient boosting quantile regression (`gbqr`)
  - seasonal autoregressive integrated models with exogenous covariates (`sarix`)
+ - pooled AR + Fourier models fit to a WIS-loss posterior (`wisar`); requires the optional `wisar` extra:
+   `pip install "idmodels[wisar] @ git+https://github.com/reichlab/idmodels.git"` (see [docs/wisar_model.md](docs/wisar_model.md))
 
 ## Installing and running the package (no development)
 
