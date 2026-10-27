@@ -31,10 +31,13 @@ class IDModel(ABC):
 
     def __init__(self, model_config: ModelConfig):
         self.model_config = model_config
+        # unique_ids (e.g. "state13") dropped by the last run() with RunConfig.drop_incomplete_locations
+        self.dropped_unique_ids: list[str] = []
 
 
     def run(self, run_config: RunConfig) -> None:
         """Load data, generate predictions, and save to file."""
+        self.dropped_unique_ids = []
         sources = self._build_sources(run_config)
         df = DiseaseDataLoader().load(sources=sources, as_of=run_config.ref_date, ancillary=[PopulationData()])
         df = self._filter_sources_df(df, run_config)
@@ -137,7 +140,14 @@ class IDModel(ABC):
 
 
     def _drop_incomplete_locations(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Drop locations missing a main-source value for the latest week (e.g. SARIX can't fit a trailing NaN)."""
+        """
+        Drop locations missing a main-source value for the latest week (e.g. SARIX can't fit a trailing NaN), and
+        record their unique_ids in self.dropped_unique_ids.
+
+        "Latest week" is the max main-source wk_end_date across all locations, which assumes every location shares
+        one as-of vintage (true for NSSP and NHSN). If a single location had a row for a newer week, every other
+        location would be dropped.
+        """
         main = df.loc[df["source"] == self.model_config.main_source.value]
         latest = main["wk_end_date"].max()
         complete = set(main.loc[(main["wk_end_date"] == latest) & main["inc"].notna(), "unique_id"])
@@ -146,8 +156,10 @@ class IDModel(ABC):
             return df
         if not complete:
             raise ValueError(f"Every location is missing a value for the latest week ({latest.date()}).")
+        # stacklevel=3 attributes the warning to the caller's model.run(...) line
         warnings.warn(f"Dropping {len(incomplete)} location(s) missing a value for the latest week "
-                      f"({latest.date()}): {incomplete}", stacklevel=2)
+                      f"({latest.date()}): {incomplete}", stacklevel=3)
+        self.dropped_unique_ids = incomplete
         return df.loc[~df["unique_id"].isin(incomplete)]
 
 

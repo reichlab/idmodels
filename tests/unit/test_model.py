@@ -92,12 +92,14 @@ def test_drop_incomplete_locations_drops_and_warns():
         out = model._drop_incomplete_locations(df)
 
     assert set(out["unique_id"]) == {"state25"}
+    assert model.dropped_unique_ids == ["hsa143", "state13"]
 
 
 def test_drop_incomplete_locations_keeps_complete_data_unchanged():
     model = _FakeModel(model_config=Mock(main_source=SourceType.NSSP))
     df = _two_week_df({"state13": 1.0, "state25": 2.0})
     pd.testing.assert_frame_equal(model._drop_incomplete_locations(df), df)
+    assert model.dropped_unique_ids == []
 
 
 def test_drop_incomplete_locations_raises_when_all_incomplete():

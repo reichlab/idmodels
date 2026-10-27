@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `RunConfig.drop_incomplete_locations` (default `False`): drop, with a warning, locations missing a main-source value for the latest week
+- `RunConfig.drop_incomplete_locations` (default `False`): drop, with a warning, locations missing a main-source value for the latest week. Dropped locations are missing from the output and recorded in `IDModel.dropped_unique_ids`
 
 ## [2.2.0] - 2026-10-19
 
