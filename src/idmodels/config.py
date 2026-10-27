@@ -54,6 +54,13 @@ class RunConfig:
     hsas: list[str]
     q_levels: list[float]
     q_labels: list[str]
+    # drop (with a warning) locations missing a main-source value for the latest week; their unique_ids are recorded
+    # in the model's dropped_unique_ids. The output will then be missing those locations, which matters for hubs
+    # that require a full location set. Mainly needed for SARIX, which can't fit a trailing NaN (GBQR can predict
+    # from a NaN feature row). Dropping removes the location's whole history, which also affects other locations'
+    # fits: it leaves SARIX's pooled fit, and with GBQR's directional wave features, it disappears as a neighbor
+    # for all weeks, not just the latest
+    drop_incomplete_locations: bool = False
 
 
 @dataclass
