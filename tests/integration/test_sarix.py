@@ -5,6 +5,7 @@ from unittest.mock import patch
 import numpy
 import pandas as pd
 import pytest
+from iddata.loader import DiseaseDataLoader
 from pandas.testing import assert_frame_equal
 
 from idmodels.config import (
@@ -72,6 +73,37 @@ def test_sarix_nssp(make_run_config, fips_codes, nci_ids):
                               f"UMass-{model_config.model_name}" /
                               f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-{agg_level}.csv")
     assert_frame_equal(actual_df, expected_df)
+
+
+def test_sarix_drop_incomplete_locations(make_run_config):
+    """A location missing the latest main-source week is dropped from the output, with a warning."""
+    date = datetime.date.fromisoformat("2025-11-22")
+    model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
+                                                  sigma_pooling=PoolingStrategy.NONE, num=100)
+    run_config = make_run_config(ref_date=date, states=["US", "01", "25"], hsas=[])
+    run_config.drop_incomplete_locations = True
+
+    load = DiseaseDataLoader.load
+
+    def _load_missing_latest_25(self, *args, **kwargs):
+        df = load(self, *args, **kwargs)
+        nssp_state = (df["source"] == "nssp") & (df["agg_level"] == "state")
+        latest = df.loc[nssp_state, "wk_end_date"].max()
+        df.loc[nssp_state & (df["location"] == "25") & (df["wk_end_date"] == latest), "inc"] = numpy.nan
+        return df
+
+    model = SARIXModel(model_config)
+    with patch.object(DiseaseDataLoader, "load", _load_missing_latest_25), \
+            pytest.warns(UserWarning, match=r"Dropping 1 location\(s\).*\['state25'\]") as record:
+        model.run(run_config)
+    # the warning points at this file's model.run(...) call, not at idmodels internals
+    assert any(w.filename == __file__ and "Dropping" in str(w.message) for w in record)
+
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv", dtype={"location": str})
+    assert set(actual_df["location"]) == {"US", "01"}
+    assert actual_df["value"].notna().all()
+    assert model.dropped_unique_ids == ["state25"]
 
 
 def test_sarix_shared_sigma_pooling_multiple_batches(make_run_config):
