@@ -61,6 +61,16 @@ class RunConfig:
     # fits: it leaves SARIX's pooled fit, and with GBQR's directional wave features, it disappears as a neighbor
     # for all weeks, not just the latest
     drop_incomplete_locations: bool = False
+    # raise an error if the latest main-source week with a non-NaN value is older than ref_date minus this many weeks,
+    # i.e. the source hasn't published the expected week yet (forecasting from stale data would silently shift every
+    # horizon by a week). 1 matches NSSP and NHSN under the current reference-date convention; None turns the check off
+    # (e.g. for backtests where the lag differed). When set, drop_incomplete_locations compares each location against
+    # this expected week rather than the newest week in the data
+    max_data_lag_weeks: int | None = 1
+
+    def __post_init__(self):
+        if self.max_data_lag_weeks is not None and self.max_data_lag_weeks < 0:
+            raise ValueError(f"max_data_lag_weeks must be at least 0 (or None), got {self.max_data_lag_weeks}.")
 
 
 @dataclass
