@@ -72,8 +72,19 @@ class RunConfig:
     # number of sample trajectories to output per location, in addition to quantiles; 0 disables sample output
     num_sample_forecasts: int = 0
     sample_id_scheme: SampleIdScheme = SampleIdScheme.STATE_ABBREVIATION
-    # drop (with a warning) locations missing a main-source value for the latest week
+    # drop (with a warning) locations missing a main-source value for the latest week; their unique_ids are recorded
+    # in the model's dropped_unique_ids. The output will then be missing those locations, which matters for hubs
+    # that require a full location set. Mainly needed for SARIX, which can't fit a trailing NaN (GBQR can predict
+    # from a NaN feature row). Dropping removes the location's whole history, which also affects other locations'
+    # fits: it leaves SARIX's pooled fit, and with GBQR's directional wave features, it disappears as a neighbor
+    # for all weeks, not just the latest
     drop_incomplete_locations: bool = False
+    # raise an error if the latest main-source week with a non-NaN value is older than ref_date minus this many weeks,
+    # i.e. the source hasn't published the expected week yet (forecasting from stale data would silently shift every
+    # horizon by a week). 1 matches NSSP and NHSN under the current reference-date convention; None turns the check off
+    # (e.g. for backtests where the lag differed). When set, drop_incomplete_locations compares each location against
+    # this expected week rather than the newest week in the data
+    max_data_lag_weeks: int | None = 1
 
 
     def __post_init__(self):
@@ -107,6 +118,10 @@ class RunConfig:
                 raise ValueError(f"No state abbreviation for state(s) {unmapped}, which sample_id_scheme="
                                  f"{self.sample_id_scheme.value} needs; add them to idmodels/data/"
                                  f"state_abbreviations.csv or use {SampleIdScheme.DRAW_NUMBER.value}.")
+        # a float (e.g. 1.5) would give a non-Saturday expected week; bool is excluded since it subclasses int
+        lag = self.max_data_lag_weeks
+        if lag is not None and (not isinstance(lag, int) or isinstance(lag, bool) or lag < 0):
+            raise ValueError(f"max_data_lag_weeks must be an int of at least 0 (or None), got {lag!r}.")
 
 
 @dataclass
@@ -173,6 +188,10 @@ class GBQRModelConfig(ModelConfig):
         # also warned at run time (GBQRModel._fit_and_predict), in case the config is changed after construction
         if self.fit_locations_separately and SourceType.SMH in [self.main_source] + self.supplementary_sources:
             warnings.warn(SMH_UNUSED_WHEN_FITTING_SEPARATELY, stacklevel=3)
+        # SMH's synthetic "syn-" locations have no centroids, so wave features can't be computed for them
+        if self.use_directional_waves and SourceType.SMH in [self.main_source] + self.supplementary_sources:
+            raise ValueError("use_directional_waves=True is not supported with SMH as a source: SMH's synthetic "
+                             "'syn-' locations have no centroids.")
 
 
 @dataclass

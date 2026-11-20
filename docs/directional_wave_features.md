@@ -192,7 +192,15 @@ This allows the model to learn patterns like: "If northern neighbors had high in
 ## Location Support
 
 Currently supported:
-- **State-level** (agg_level='state'): US states, DC, PR, and national level
+- **State-level** (agg_level='state'): US states, DC, and PR
+
+## Limitations
+
+- **State rows only**: Wave features are computed only for rows with `agg_level == 'state'`. Other rows that appear alongside states (e.g. national) get NaN for every wave feature, which LightGBM handles as missing values.
+- **National level is not a neighbor**: The national (`US`) centroid is never included in any state's neighbor averages.
+- **No SMH**: SMH rows use synthetic `syn-XX` locations, which have no centroids. `GBQRModelConfig` raises a `ValueError` if `use_directional_waves=True` is combined with SMH as a main or supplementary source.
+- **Data with no state rows raises**: If the data has no state-level rows at all (e.g. an HSA-only run), `DirectionalWaveFeature` raises a `ValueError` instead of returning all-NaN features.
+- **Lags are by row**: Lags shift back by row within each series, not by calendar week, so if a series is missing a week, "lag1" is the value from two weeks earlier (the same as the other lag features).
 
 **Data Source:** State centroids are loaded from `src/idmodels/data/state_centroids.csv`, which contains geographic centroids computed from US Census Bureau TIGER/Line shapefiles. See `src/idmodels/data/README.md` for detailed source information.
 
@@ -338,12 +346,13 @@ Potential extensions:
 ## Troubleshooting
 
 ### "Missing coordinates for locations" error
-- Ensure all locations in your data have entries in `STATE_CENTROIDS` (spatial_utils.py)
-- Check that `agg_level` in your data matches supported levels ('state')
+- Ensure all state-level locations in your data have entries in `src/idmodels/data/state_centroids.csv`
+- SMH's synthetic `syn-XX` locations have no centroids; see [Limitations](#limitations)
 
 ### Wave features are all NaN
 - Check `wave_max_distance_km` - may be too small
-- Verify location codes match those in `STATE_CENTROIDS`
+- Verify location codes match those in `src/idmodels/data/state_centroids.csv`
+- Non-state rows (e.g. national) always get NaN; see [Limitations](#limitations)
 - Some edge locations (islands, coastal states) naturally have fewer neighbors
 
 ### Training is slow

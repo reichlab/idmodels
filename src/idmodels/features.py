@@ -8,9 +8,10 @@ from iddata.utils import get_holidays
 from timeseriesutils import featurize
 
 from idmodels.spatial_utils import (
+    NATIONAL_LOCATION,
     get_directional_neighbors,
     get_location_centroids,
-    haversine_distance,
+    get_neighbors_within_distance,
     validate_wave_directions,
 )
 
@@ -246,6 +247,15 @@ class DirectionalWaveFeature(Feature):
     of `inc_trans_cs` from neighbors in that direction within `max_distance_km`. Also
     supports an omnidirectional aggregate feature and temporal lags.
 
+    Neighbor averages are computed separately within each series defined by
+    `group_columns` (minus "location"), so e.g. NHSN values are never averaged into
+    NSSP rows.
+
+    Known limitation: only state-level data is supported. Features are computed for
+    rows with ``agg_level == "state"``; all other rows (e.g. national, HSA) get NaN,
+    and the national ("US") centroid is never used as a neighbor. Data with no state
+    rows raises ValueError.
+
     Parameters
     ----------
     directions : list[str]
@@ -258,6 +268,9 @@ class DirectionalWaveFeature(Feature):
         If True, adds a velocity feature (current minus lag-1) for each base feature.
     include_aggregate : bool
         If True, adds an omnidirectional weighted-average feature (``inc_trans_cs_wave_avg``).
+    group_columns : list[str] | None
+        Columns identifying a single time series; must include "location". Defaults to
+        ["source", "location"].
     """
 
 
@@ -268,12 +281,16 @@ class DirectionalWaveFeature(Feature):
             max_distance_km: float,
             include_velocity: bool = False,
             include_aggregate: bool = True,
+            group_columns: list[str] | None = None,
     ):
         self.directions = directions
         self.temporal_lags = temporal_lags
         self.max_distance_km = max_distance_km
         self.include_velocity = include_velocity
         self.include_aggregate = include_aggregate
+        self.group_columns = group_columns if group_columns is not None else ["source", "location"]
+        if "location" not in self.group_columns:
+            raise ValueError(f"group_columns must include 'location', got {self.group_columns}.")
 
 
     def apply(self, df: pd.DataFrame, feat_names: list[str]) -> tuple[pd.DataFrame, list[str]]:
@@ -286,108 +303,119 @@ class DirectionalWaveFeature(Feature):
         """Compute directional wave features and return augmented df plus feature names."""
         validate_wave_directions(self.directions)
 
-        agg_levels = df["agg_level"].unique()
-        if len(agg_levels) > 1:
-            raise ValueError(f"Multiple aggregation levels found: {agg_levels}. "
-                             "Directional wave features currently support only one agg_level at a time.")
+        # Only state-level rows are featurized; the national centroid is not a valid neighbor.
+        location_coords = get_location_centroids(agg_level="state")
+        location_coords.pop(NATIONAL_LOCATION, None)
 
-        agg_level = agg_levels[0]
+        # Work on a RangeIndex copy so shifts/assignments align; the caller's index is restored at the end
+        orig_index = df.index
+        df = df.reset_index(drop=True)
+        df_state = df.loc[df["agg_level"] == "state"]
+        if df_state.empty:
+            raise ValueError(f"Directional wave features require state-level rows; found only agg_level values "
+                             f"{sorted(df['agg_level'].unique())}.")
 
-        location_coords = get_location_centroids(agg_level=agg_level)
-
-        locations_in_df = set(df["location"].unique())
-        locations_with_coords = set(location_coords.keys())
-        missing = locations_in_df - locations_with_coords
+        locations = sorted(df_state["location"].unique())
+        missing = set(locations) - set(location_coords.keys())
         if missing:
             raise ValueError(f"Missing coordinates for locations: {missing}. Cannot compute directional wave features.")
 
-        # Precompute directional neighbors
-        neighbor_cache: dict = {}
-        for loc in locations_in_df:
-            neighbor_cache[loc] = {}
-            for direction in self.directions:
-                neighbor_cache[loc][direction] = get_directional_neighbors(
+        series_cols = [c for c in self.group_columns if c != "location"]
+        key_cols = series_cols + ["location", "wk_end_date"]
+        dupes = df_state.duplicated(subset=key_cols)
+        if dupes.any():
+            raise ValueError(f"Directional wave features require one row per {key_cols}; found {dupes.sum()} "
+                             f"duplicate rows. Check group_columns.")
+
+        # Inverse-distance weight matrix per base feature: weights[feat][i, j] is the weight location j
+        # gets in location i's neighbor average (0 if j is not a neighbor of i).
+        loc_idx = {loc: i for i, loc in enumerate(locations)}
+
+        def _weight_matrix(neighbors_of) -> np.ndarray:
+            w = np.zeros((len(locations), len(locations)))
+            for loc in locations:
+                for nloc, dist in neighbors_of(loc):
+                    if nloc in loc_idx:
+                        w[loc_idx[loc], loc_idx[nloc]] = 1.0 / dist if dist > 0 else 1.0
+            return w
+
+        weights: dict[str, np.ndarray] = {}
+        for direction in self.directions:
+            weights[f"inc_trans_cs_wave_{direction}"] = _weight_matrix(
+                lambda loc, direction=direction: get_directional_neighbors(
                     origin_loc=loc,
                     origin_coord=location_coords[loc],
                     all_coords=location_coords,
                     direction=direction,
                     max_distance_km=self.max_distance_km,
                 )
-
-        # Precompute all-direction neighbors for aggregate feature
+            )
         if self.include_aggregate:
-            all_neighbor_cache: dict = {}
-            for loc in locations_in_df:
-                neighbors = [(other_loc, haversine_distance(location_coords[loc], coord))
-                             for other_loc, coord in location_coords.items()
-                             if other_loc != loc]
-                neighbors = [(nloc, dist) for nloc, dist in neighbors if dist <= self.max_distance_km]
-                neighbors.sort(key=lambda x: x[1])
-                all_neighbor_cache[loc] = neighbors
+            weights["inc_trans_cs_wave_avg"] = _weight_matrix(
+                lambda loc: get_neighbors_within_distance(
+                    origin_loc=loc,
+                    origin_coord=location_coords[loc],
+                    all_coords=location_coords,
+                    max_distance_km=self.max_distance_km,
+                )
+            )
+        base_feat_names = list(weights.keys())
 
-        # Sort dataframe by location and date for efficient processing
-        df_sorted = df.sort_values(["location", "wk_end_date"]).reset_index(drop=True)
-        wave_features: dict = {}
+        # Weighted neighbor averages, computed separately within each series (e.g. source)
+        series_groups = df_state.groupby(series_cols, sort=False, dropna=False) if series_cols else [((), df_state)]
+        long_frames = []
+        for key, grp in series_groups:
+            pivot = grp.pivot(index="wk_end_date", columns="location", values="inc_trans_cs").reindex(columns=locations)
+            values = pivot.to_numpy(dtype=float)
+            valid = ~np.isnan(values)
+            filled = np.where(valid, values, 0.0)
 
+            long = pd.DataFrame({
+                "wk_end_date": np.repeat(pivot.index.to_numpy(), len(locations)),
+                "location": np.tile(np.array(locations, dtype=object), len(pivot.index)),
+            })
+            for feat_name, w in weights.items():
+                weighted_sum = filled @ w.T
+                weight_total = valid.astype(float) @ w.T
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    result = weighted_sum / weight_total
+                result[weight_total == 0] = np.nan
+                long[feat_name] = result.ravel()
 
-        def _weighted_avg(neighbors, date):
-            ws, wt = 0.0, 0.0
-            for nloc, dist in neighbors:
-                val = df_sorted.loc[
-                    (df_sorted["location"] == nloc) & (df_sorted["wk_end_date"] == date),
-                    "inc_trans_cs",
-                ]
-                if len(val) > 0 and not pd.isna(val.iloc[0]):
-                    w = 1.0 / dist if dist > 0 else 1.0
-                    ws += w * val.iloc[0]
-                    wt += w
-            return ws / wt if wt > 0 else np.nan
+            key = key if isinstance(key, tuple) else (key,)
+            for col, val in zip(series_cols, key):
+                long[col] = val
+            long_frames.append(long)
 
+        if long_frames:
+            wave_long = pd.concat(long_frames, ignore_index=True)
+        else:
+            wave_long = pd.DataFrame(columns=key_cols + base_feat_names)
+        wave_long["agg_level"] = "state"
 
-        # Base directional features
-        for direction in self.directions:
-            feat_name = f"inc_trans_cs_wave_{direction}"
-            feat_values = []
-            for _, row in df_sorted.iterrows():
-                loc = row["location"]
-                date = row["wk_end_date"]
-                neighbors = neighbor_cache[loc][direction]
-                feat_values.append(_weighted_avg(neighbors, date))
-            wave_features[feat_name] = feat_values
+        merged = df[["agg_level"] + key_cols].merge(wave_long, on=["agg_level"] + key_cols, how="left")
+        for feat_name in base_feat_names:
+            df[feat_name] = merged[feat_name].to_numpy(dtype=float)
 
-        # Aggregate feature
-        if self.include_aggregate:
-            feat_values = []
-            for _, row in df_sorted.iterrows():
-                loc = row["location"]
-                date = row["wk_end_date"]
-                feat_values.append(_weighted_avg(all_neighbor_cache[loc], date))
-            wave_features["inc_trans_cs_wave_avg"] = feat_values
-
-        # Add base features to dataframe
-        for feat_name, vals in wave_features.items():
-            df_sorted[feat_name] = vals
-
-        base_feat_names = list(wave_features.keys())
-
-        # Temporal lags
+        # Temporal lags and velocity, shifted within each series in date order
+        lag_groups = (
+            df.sort_values(self.group_columns + ["wk_end_date"], kind="stable")
+            .groupby(["agg_level"] + self.group_columns, sort=False, dropna=False)
+        )
         for feat_name in base_feat_names:
             for lag in self.temporal_lags:
-                lagged = f"{feat_name}_lag{lag}"
-                df_sorted[lagged] = df_sorted.groupby("location")[feat_name].shift(lag)
+                df[f"{feat_name}_lag{lag}"] = lag_groups[feat_name].shift(lag)
 
-        # Velocity features
         if self.include_velocity:
             for feat_name in base_feat_names:
                 lag1 = f"{feat_name}_lag1"
-                if lag1 not in df_sorted.columns:
+                if lag1 not in df.columns:
                     warnings.warn(f"include_velocity=True: adding extra column '{lag1}' (not in temporal_lags) to "
                                   f"compute velocity.")
-                    df_sorted[lag1] = df_sorted.groupby("location")[feat_name].shift(1)
-                df_sorted[f"{feat_name}_velocity"] = df_sorted[feat_name] - df_sorted[lag1]
+                    df[lag1] = lag_groups[feat_name].shift(1)
+                df[f"{feat_name}_velocity"] = df[feat_name] - df[lag1]
 
-        # Restore original index order
-        df_sorted = df_sorted.sort_index()
+        df.index = orig_index
 
         # Collect all feature names
         wave_feat_names = list(base_feat_names)
@@ -395,7 +423,7 @@ class DirectionalWaveFeature(Feature):
         if self.include_velocity:
             wave_feat_names += [f"{fn}_velocity" for fn in base_feat_names]
 
-        return df_sorted, wave_feat_names
+        return df, wave_feat_names
 
 
 class FeaturePipeline:

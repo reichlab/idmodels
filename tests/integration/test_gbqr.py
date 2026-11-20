@@ -387,6 +387,23 @@ def test_gbqr_model_config_rejects_smh_num_otid_below_one(smh_num_otid):
         )
 
 
+@pytest.mark.parametrize("main_source, supplementary_sources", [
+    (SourceType.NHSN, [SourceType.SMH]),
+    (SourceType.SMH, []),
+])
+def test_gbqr_model_config_rejects_directional_waves_with_smh(main_source, supplementary_sources):
+    """SMH's synthetic 'syn-' locations have no centroids, so wave features would fail at run time."""
+    with pytest.raises(ValueError, match="use_directional_waves=True is not supported with SMH"):
+        GBQRModelConfig(
+            model_name="gbqr_bad_config",
+            main_source=main_source,
+            supplementary_sources=supplementary_sources,
+            fit_locations_separately=False,
+            power_transform=PowerTransform.FOURTH_ROOT,
+            use_directional_waves=True,
+        )
+
+
 @pytest.mark.parametrize("smh_model, smh_otid, smh_num_otid, ref_date, match", [
     (["NoSuchModel"], [], 2, "2024-12-07", "No SMH rows found for smh_model"),
     (["NoSuchModel"], [], None, "2024-12-07", "No SMH rows found for smh_model"),
