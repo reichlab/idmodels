@@ -106,6 +106,26 @@ def test_sarix_drop_incomplete_locations(make_run_config):
     assert model.dropped_unique_ids == ["state25"]
 
 
+def test_sarix_raises_if_latest_week_missing(make_run_config):
+    """If the main source hasn't published the expected week, run() raises instead of forecasting from stale data."""
+    date = datetime.date.fromisoformat("2025-11-22")
+    model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
+                                                  sigma_pooling=PoolingStrategy.NONE, num=100)
+    run_config = make_run_config(ref_date=date, states=["US", "01", "25"], hsas=[])
+
+    load = DiseaseDataLoader.load
+
+    def _load_without_latest_week(self, *args, **kwargs):
+        df = load(self, *args, **kwargs)
+        return df.loc[~((df["source"] == "nssp") & (df["wk_end_date"] == pd.Timestamp("2025-11-15")))]
+
+    model = SARIXModel(model_config)
+    with patch.object(DiseaseDataLoader, "load", _load_without_latest_week), \
+            pytest.raises(ValueError, match="expected a value for the week ending 2025-11-15.*2025-11-08"):
+        model.run(run_config)
+    assert not (run_config.output_root / f"UMass-{model_config.model_name}").exists()
+
+
 def test_sarix_shared_sigma_pooling_multiple_batches(make_run_config):
     """Test that sigma_pooling='shared' works correctly with multiple batches (locations)."""
     # Use multiple locations to ensure we have multiple batches

@@ -43,8 +43,9 @@ class IDModel(ABC):
         df = self._filter_sources_df(df, run_config)
         df = self._filter_locations(df, run_config)
         df["unique_id"] = df["agg_level"] + df["location"]
+        self._raise_if_stale(df, run_config)
         if run_config.drop_incomplete_locations:
-            df = self._drop_incomplete_locations(df)
+            df = self._drop_incomplete_locations(df, latest=self._expected_week(run_config))
 
         transform = self._build_transform()
         df = transform.apply(df)
@@ -139,17 +140,53 @@ class IDModel(ABC):
         return pd.concat([df_states, df_hsas], join="inner", axis=0)
 
 
-    def _drop_incomplete_locations(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _expected_week(run_config: RunConfig) -> pd.Timestamp | None:
+        """
+        The latest wk_end_date the main source should have data for: ref_date - run_config.max_data_lag_weeks weeks,
+        or None if the staleness check is off (max_data_lag_weeks is None).
+        """
+        if run_config.max_data_lag_weeks is None:
+            return None
+        return pd.Timestamp(run_config.ref_date) - pd.Timedelta(weeks=run_config.max_data_lag_weeks)
+
+
+    def _raise_if_stale(self, df: pd.DataFrame, run_config: RunConfig) -> None:
+        """
+        Raise if the main source hasn't published the expected week (see _expected_week()), i.e. the latest
+        main-source week with a non-NaN value (across the requested locations) is older than it. Without this, the
+        models would forecast from the last available week and _format_output would shift every horizon.
+
+        Data newer than the expected week pass. With the default max_data_lag_weeks=1 that can't happen for NSSP or
+        NHSN, since data are loaded as of ref_date and the week ending ref_date isn't published by then.
+        """
+        expected = self._expected_week(run_config)
+        if expected is None:
+            return
+        main = df.loc[(df["source"] == self.model_config.main_source.value) & df["inc"].notna()]
+        latest = main["wk_end_date"].max()
+        if pd.isna(latest) or latest < expected:
+            actual = "no non-NaN rows" if pd.isna(latest) else latest.date()
+            raise ValueError(
+                f"{self.model_config.main_source.value} data are not current for ref_date={run_config.ref_date}: "
+                f"expected a value for the week ending {expected.date()}, but the latest week with data is {actual}. "
+                f"Set RunConfig.max_data_lag_weeks=None to skip this check."
+            )
+
+
+    def _drop_incomplete_locations(self, df: pd.DataFrame, latest: pd.Timestamp | None = None) -> pd.DataFrame:
         """
         Drop locations missing a main-source value for the latest week (e.g. SARIX can't fit a trailing NaN), and
         record their unique_ids in self.dropped_unique_ids.
 
-        "Latest week" is the max main-source wk_end_date across all locations, which assumes every location shares
-        one as-of vintage (true for NSSP and NHSN). If a single location had a row for a newer week, every other
-        location would be dropped.
+        "Latest week" is `latest` if given (run() passes _expected_week(), which is None if the check is off).
+        Otherwise it is the max main-source wk_end_date across all locations, which assumes every location shares one
+        as-of vintage (true for NSSP and NHSN): if a single location had a row for a newer week, every other location
+        would be dropped.
         """
         main = df.loc[df["source"] == self.model_config.main_source.value]
-        latest = main["wk_end_date"].max()
+        if latest is None:
+            latest = main["wk_end_date"].max()
         complete = set(main.loc[(main["wk_end_date"] == latest) & main["inc"].notna(), "unique_id"])
         incomplete = sorted(set(main["unique_id"]) - complete)
         if not incomplete:
