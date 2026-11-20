@@ -7,6 +7,7 @@ from idmodels.config import (
     PoolingStrategy,
     PowerTransform,
     RunConfig,
+    SampleIdScheme,
     SARIXFourierModelConfig,
     SARIXModelConfig,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "PoolingStrategy",
     "PowerTransform",
     "RunConfig",
+    "SampleIdScheme",
     "SARIXFourierModel",
     "SARIXFourierModelConfig",
     "SARIXModel",
