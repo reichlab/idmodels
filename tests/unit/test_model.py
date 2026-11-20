@@ -124,16 +124,25 @@ def _run_config(ref_date="2026-10-24", max_data_lag_weeks=1):
     return Mock(ref_date=pd.Timestamp(ref_date).date(), max_data_lag_weeks=max_data_lag_weeks)
 
 
-def test_raise_if_stale_passes_and_returns_expected_week_when_current():
+@pytest.mark.parametrize("max_data_lag_weeks, expected", [
+    (1, pd.Timestamp("2026-10-17")),
+    (2, pd.Timestamp("2026-10-10")),
+    (None, None),
+])
+def test_expected_week(max_data_lag_weeks, expected):
+    assert IDModel._expected_week(_run_config(max_data_lag_weeks=max_data_lag_weeks)) == expected
+
+
+def test_raise_if_stale_passes_when_current():
     model = _FakeModel(model_config=Mock(main_source=SourceType.NSSP))
     df = _two_week_df({"state13": 1.0, "state25": 2.0})  # latest week 2026-10-17 = ref_date - 1 week
-    assert model._raise_if_stale(df, _run_config()) == pd.Timestamp("2026-10-17")
+    model._raise_if_stale(df, _run_config())  # should not raise
 
 
 def test_raise_if_stale_passes_when_data_are_newer_than_expected():
     model = _FakeModel(model_config=Mock(main_source=SourceType.NSSP))
     df = _two_week_df({"state13": 1.0, "state25": 2.0})
-    assert model._raise_if_stale(df, _run_config(max_data_lag_weeks=2)) == pd.Timestamp("2026-10-10")
+    model._raise_if_stale(df, _run_config(max_data_lag_weeks=2))  # should not raise
 
 
 def test_raise_if_stale_raises_when_latest_week_missing():
@@ -165,11 +174,12 @@ def test_raise_if_stale_ignores_other_sources():
 def test_raise_if_stale_skipped_when_off():
     model = _FakeModel(model_config=Mock(main_source=SourceType.NSSP))
     df = _two_week_df({"state13": 1.0})
-    assert model._raise_if_stale(df, _run_config(ref_date="2027-01-02", max_data_lag_weeks=None)) is None
+    model._raise_if_stale(df, _run_config(ref_date="2027-01-02", max_data_lag_weeks=None))  # should not raise
 
 
-def test_run_config_rejects_negative_max_data_lag_weeks(tmp_path):
-    with pytest.raises(ValueError, match="max_data_lag_weeks must be at least 0"):
+@pytest.mark.parametrize("max_data_lag_weeks", [-1, 1.5, True])
+def test_run_config_rejects_invalid_max_data_lag_weeks(tmp_path, max_data_lag_weeks):
+    with pytest.raises(ValueError, match="max_data_lag_weeks must be an int of at least 0"):
         RunConfig(disease=Disease.FLU, ref_date=pd.Timestamp("2026-10-24").date(), output_root=tmp_path,
                   artifact_store_root=None, max_horizon=3, states=["US"], hsas=[], q_levels=[0.5], q_labels=["0.5"],
-                  max_data_lag_weeks=-1)
+                  max_data_lag_weeks=max_data_lag_weeks)

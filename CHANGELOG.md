@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RunConfig.drop_incomplete_locations` (default `False`): drop, with a warning, locations missing a main-source value for the latest week. Dropped locations are missing from the output and recorded in `IDModel.dropped_unique_ids`
 - `RunConfig.max_data_lag_weeks` (default `1`): `run()` raises an error if the latest main-source week with a non-NaN value is older than `ref_date` minus this many weeks, instead of silently forecasting from stale data with every horizon shifted by a week. `None` turns the check off. When set, `drop_incomplete_locations` compares each location against this expected week rather than the newest week in the data
 
+### Changed
+- **Behavior change:** because `max_data_lag_weeks` defaults to `1`, runs whose main-source data are older than `ref_date - 1 week` now raise an error instead of producing a forecast. Callers that intentionally run with a longer lag (e.g. backtests, or a holiday-week reporting delay) need `max_data_lag_weeks=None` or a larger value
+
 ## [2.2.0] - 2026-10-19
 
 ### Added

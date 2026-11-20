@@ -120,7 +120,8 @@ def test_sarix_raises_if_latest_week_missing(make_run_config):
         return df.loc[~((df["source"] == "nssp") & (df["wk_end_date"] == pd.Timestamp("2025-11-15")))]
 
     model = SARIXModel(model_config)
-    with patch.object(DiseaseDataLoader, "load", _load_without_latest_week),             pytest.raises(ValueError, match="expected a value for the week ending 2025-11-15.*2025-11-08"):
+    with patch.object(DiseaseDataLoader, "load", _load_without_latest_week), \
+            pytest.raises(ValueError, match="expected a value for the week ending 2025-11-15.*2025-11-08"):
         model.run(run_config)
     assert not (run_config.output_root / f"UMass-{model_config.model_name}").exists()
 

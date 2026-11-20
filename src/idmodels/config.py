@@ -69,8 +69,10 @@ class RunConfig:
     max_data_lag_weeks: int | None = 1
 
     def __post_init__(self):
-        if self.max_data_lag_weeks is not None and self.max_data_lag_weeks < 0:
-            raise ValueError(f"max_data_lag_weeks must be at least 0 (or None), got {self.max_data_lag_weeks}.")
+        # a float (e.g. 1.5) would give a non-Saturday expected week; bool is excluded since it subclasses int
+        lag = self.max_data_lag_weeks
+        if lag is not None and (not isinstance(lag, int) or isinstance(lag, bool) or lag < 0):
+            raise ValueError(f"max_data_lag_weeks must be an int of at least 0 (or None), got {lag!r}.")
 
 
 @dataclass
