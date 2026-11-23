@@ -106,11 +106,18 @@ class SARIXModel(IDModel):
     def _get_extra_sarix_params(self, df: pd.DataFrame, run_config: RunConfig) -> dict:
         """
         Extra parameters for the SARIX constructor. The base class returns calendar-effect parameters when
-        model_config.calendar_holidays is non-empty, and {} otherwise. Subclasses extend this.
+        model_config.calendar_holidays is non-empty and innovation-distribution parameters when
+        model_config.innovation_dist is "t", and {} otherwise. Subclasses extend this.
         """
         cfg = self.model_config
+        params = {}
+        if cfg.innovation_dist == "t":
+            params = {"innovation_dist": "t",
+                      "innovation_df_pooling": _sarix_pooling(cfg.innovation_df_pooling),
+                      "innovation_df_prior_scale": cfg.innovation_df_prior_scale,
+                      "innovation_df_sd_prior_scale": cfg.innovation_df_sd_prior_scale}
         if not cfg.calendar_holidays:
-            return {}
+            return params
 
         # labels for the training weeks followed by the forecast weeks, shared across locations;
         # only the target (last column of xy) gets calendar effects
@@ -130,8 +137,9 @@ class SARIXModel(IDModel):
         input_center = np.full((len(center), len(cfg.x) + 1), np.nan)  # x columns have no calendar effects
         input_center[:, -1] = center["min"].values
 
-        return {"calendar_labels": labels,
-                "calendar_pooling": _calendar_pooling(cfg.calendar_pooling),
+        return {**params,
+                "calendar_labels": labels,
+                "calendar_pooling": _sarix_pooling(cfg.calendar_pooling),
                 "calendar_effect_sd_prior_scale": cfg.calendar_effect_sd_prior_scale,
                 "calendar_effect_mu_prior_scale": cfg.calendar_effect_mu_prior_scale,
                 "input_power": power,
@@ -180,8 +188,11 @@ def _batch_wk_end_dates(df: pd.DataFrame) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(dates_by_id.iloc[0])
 
 
-def _calendar_pooling(value: PoolingStrategy) -> str:
-    """The sarix calendar_pooling option for a PoolingStrategy. sarix deprecates "none" in favour of "unshared"."""
+def _sarix_pooling(value: PoolingStrategy) -> str:
+    """
+    The sarix calendar_pooling or innovation_df_pooling option for a PoolingStrategy. sarix deprecates "none" in
+    favour of "unshared".
+    """
     return {PoolingStrategy.NONE: "unshared",
             PoolingStrategy.SHARED: "shared",
             PoolingStrategy.PARTIAL: "partial"}[PoolingStrategy(value)]

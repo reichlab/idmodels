@@ -25,9 +25,9 @@ class PowerTransform(str, Enum):
 
 
 class PoolingStrategy(str, Enum):
-    NONE = "none"  # passed to sarix as "unshared" for calendar_pooling
+    NONE = "none"  # passed to sarix as "unshared" for calendar_pooling and innovation_df_pooling
     SHARED = "shared"
-    PARTIAL = "partial"  # currently only for SARIX calendar effects (calendar_pooling)
+    PARTIAL = "partial"  # currently only for SARIX calendar_pooling and innovation_df_pooling
 
 
 @dataclass
@@ -86,9 +86,22 @@ class SARIXModelConfig(ModelConfig):
     calendar_pooling: PoolingStrategy | None = None
     calendar_effect_sd_prior_scale: float = 1.0
     calendar_effect_mu_prior_scale: float = 1.0
+    # innovation distribution: "normal" or "t" (Student's t, standardized so that sigma is the innovation sd, with
+    # degrees of freedom above 2; see sarix's SARIX docs). innovation_df_pooling is required with "t" and pools the
+    # degrees of freedom across locations
+    innovation_dist: str = "normal"
+    innovation_df_pooling: PoolingStrategy | None = None
+    innovation_df_prior_scale: float = 10.0
+    innovation_df_sd_prior_scale: float = 1.0
 
     def __post_init__(self):
         super().__post_init__()
+        if self.innovation_dist not in ("normal", "t"):
+            raise ValueError(f"innovation_dist must be 'normal' or 't', got {self.innovation_dist!r}")
+        if self.innovation_dist == "t" and self.innovation_df_pooling is None:
+            raise ValueError("innovation_df_pooling must be specified when innovation_dist is 't'")
+        if self.innovation_dist == "normal" and self.innovation_df_pooling is not None:
+            raise ValueError("innovation_df_pooling should not be specified when innovation_dist is 'normal'")
         if self.calendar_holidays:
             if len(set(self.calendar_holidays)) != len(self.calendar_holidays):
                 raise ValueError(f"calendar_holidays must be distinct, got {self.calendar_holidays}")
