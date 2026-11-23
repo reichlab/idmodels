@@ -106,8 +106,9 @@ class SARIXModel(IDModel):
     def _get_extra_sarix_params(self, df: pd.DataFrame, run_config: RunConfig) -> dict:
         """
         Extra parameters for the SARIX constructor. The base class returns calendar-effect parameters when
-        model_config.calendar_holidays is non-empty and innovation-distribution parameters when
-        model_config.innovation_dist is "t", and {} otherwise. Subclasses extend this.
+        model_config.calendar_holidays is non-empty, innovation-distribution parameters when
+        model_config.innovation_dist is "t" and level-dependent innovation sd parameters when
+        model_config.sigma_level is True; {} if none of these apply. Subclasses extend this.
         """
         cfg = self.model_config
         params = {}
@@ -116,6 +117,12 @@ class SARIXModel(IDModel):
                       "innovation_df_pooling": _sarix_pooling(cfg.innovation_df_pooling),
                       "innovation_df_prior_scale": cfg.innovation_df_prior_scale,
                       "innovation_df_sd_prior_scale": cfg.innovation_df_sd_prior_scale}
+        if cfg.sigma_level:
+            params |= {"sigma_level": True,
+                       "sigma_level_pooling": _sarix_pooling(cfg.sigma_level_pooling),
+                       "sigma_level_prior_scale": cfg.sigma_level_prior_scale,
+                       "sigma_level_sd_prior_scale": cfg.sigma_level_sd_prior_scale,
+                       "sigma_level_offset_prior_scale": cfg.sigma_level_offset_prior_scale}
         if not cfg.calendar_holidays:
             return params
 
@@ -190,8 +197,8 @@ def _batch_wk_end_dates(df: pd.DataFrame) -> pd.DatetimeIndex:
 
 def _sarix_pooling(value: PoolingStrategy) -> str:
     """
-    The sarix calendar_pooling or innovation_df_pooling option for a PoolingStrategy. sarix deprecates "none" in
-    favour of "unshared".
+    The sarix calendar_pooling, innovation_df_pooling or sigma_level_pooling option for a PoolingStrategy. sarix
+    deprecates "none" in favour of "unshared".
     """
     return {PoolingStrategy.NONE: "unshared",
             PoolingStrategy.SHARED: "shared",
