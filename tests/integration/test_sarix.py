@@ -11,7 +11,6 @@ from pandas.testing import assert_frame_equal
 from idmodels.config import (
     PoolingStrategy,
     PowerTransform,
-    SampleIdScheme,
     SARIXFourierModelConfig,
     SARIXModelConfig,
     SourceType,
@@ -272,7 +271,7 @@ def _read_output(run_config, model_config):
                        dtype={"location": str, "output_type_id": str})
 
 
-def test_sarix_samples_state_abbreviation(make_run_config):
+def test_sarix_samples_with_quantiles(make_run_config):
     # same setup as test_sarix_nssp's states-only case, so the quantile rows can be checked against its expected output
     date = datetime.date.fromisoformat("2025-11-22")
     fips_codes = ["US", "01", "25"]
@@ -300,7 +299,7 @@ def test_sarix_samples_state_abbreviation(make_run_config):
     sample_df = actual_df.iloc[n_quantile_rows:]
     assert (sample_df["output_type"] == "sample").all()
     assert len(sample_df) == len(fips_codes) * run_config.max_horizon * 5
-    expected_ids = {f"{abbr}{i:02d}" for abbr in ["US", "AL", "MA"] for i in range(5)}
+    expected_ids = {f"{uid}-{i}" for uid in ["nationalUS", "state01", "state25"] for i in range(1, 6)}
     assert set(sample_df["output_type_id"]) == expected_ids
     # each id is one trajectory: a single location, one row per horizon
     assert (sample_df.groupby("output_type_id")["location"].nunique() == 1).all()
@@ -308,12 +307,12 @@ def test_sarix_samples_state_abbreviation(make_run_config):
     assert sample_df["value"].between(0, 1).all()  # NSSP is output as a proportion
 
 
-def test_sarix_samples_only_draw_number_with_hsas(make_run_config):
+def test_sarix_samples_only_with_hsas(make_run_config):
     date = datetime.date.fromisoformat("2025-11-22")
     model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
                                                   sigma_pooling=PoolingStrategy.NONE, num=50)
-    run_config = make_run_config(ref_date=date, states=["US", "01"], hsas=["1", "25"], num_sample_forecasts=12,
-                                 sample_id_scheme=SampleIdScheme.DRAW_NUMBER)
+    # state 25 and HSA 25 share a location code, so their labels must differ by agg_level
+    run_config = make_run_config(ref_date=date, states=["US", "01", "25"], hsas=["1", "25"], num_sample_forecasts=12)
     run_config.q_levels, run_config.q_labels = [], []  # samples only
     SARIXModel(model_config).run(run_config)
     actual_df = _read_output(run_config, model_config)
@@ -321,11 +320,13 @@ def test_sarix_samples_only_draw_number_with_hsas(make_run_config):
     assert (actual_df["output_type"] == "sample").all()
     sample_df = actual_df
     assert set(sample_df["agg_level"]) == {"national", "state", "hsa"}
-    assert len(sample_df) == 4 * run_config.max_horizon * 12
-    # every location gets ids 1..12, in numeric order
-    assert (sample_df.groupby(["agg_level", "location"])["output_type_id"]
-            .apply(lambda ids: set(ids) == {str(i) for i in range(1, 13)})).all()
-    assert sample_df["output_type_id"].astype(int).is_monotonic_increasing
+    assert len(sample_df) == 5 * run_config.max_horizon * 12
+    # every location gets ids {unique_id}-1..{unique_id}-12, in numeric order
+    for (agg_level, location), ids in sample_df.groupby(["agg_level", "location"])["output_type_id"]:
+        assert set(ids) == {f"{agg_level}{location}-{i}" for i in range(1, 13)}
+    assert sample_df["output_type_id"].str.split("-").str[1].astype(int).is_monotonic_increasing
+    # each id is one trajectory: a single location, one row per horizon
+    assert (sample_df.groupby("output_type_id").size() == run_config.max_horizon).all()
     assert sample_df["value"].notna().all()
     assert sample_df["value"].between(0, 1).all()  # NSSP is output as a proportion
 

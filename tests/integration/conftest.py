@@ -1,12 +1,12 @@
 import pytest
 from iddata.enums import Disease
 
-from idmodels.config import RunConfig, SampleIdScheme
+from idmodels.config import RunConfig
 
 
 @pytest.fixture
 def make_run_config(tmp_path):
-    def _make(ref_date, states, hsas, num_sample_forecasts=0, sample_id_scheme=SampleIdScheme.STATE_ABBREVIATION):
+    def _make(ref_date, states, hsas, num_sample_forecasts=0):
         return RunConfig(
             disease=Disease.FLU,
             ref_date=ref_date,
@@ -18,6 +18,5 @@ def make_run_config(tmp_path):
             q_levels=[0.025, 0.50, 0.975],
             q_labels=["0.025", "0.5", "0.975"],
             num_sample_forecasts=num_sample_forecasts,
-            sample_id_scheme=sample_id_scheme,
         )
     return _make

@@ -9,10 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Sample-format forecasts (`output_type == "sample"`), written alongside quantile rows: `RunConfig.num_sample_forecasts` sets the number of sample trajectories per location (default `0`, no samples)
-- `SampleIdScheme` and `RunConfig.sample_id_scheme` for labeling sample `output_type_id`s: `STATE_ABBREVIATION` (`US00`, `AL01`, ...; states/national only, at most 100 samples) or `DRAW_NUMBER` (`1`, `2`, ...; any location, with a per-location prefix expected to be added downstream)
+- Sample `output_type_id`s are labeled `{unique_id}-{n}`, where `unique_id` is `agg_level` + `location` and `n` runs from 1 to `num_sample_forecasts` (e.g. `nationalUS-1`, `state25-100`, `hsa25-3`), so labels are unique across locations and agg levels
 - `SARIXModel` sample output: posterior predictive draws are subsampled without replacement (seeded by `ref_date`), using the same draws for every location
 - Samples-only runs: `q_levels`/`q_labels` may be empty when `num_sample_forecasts > 0` (`RunConfig` rejects a run with neither, and `q_levels`/`q_labels` of different lengths)
-- Vendored `data/state_abbreviations.csv` mapping state/national FIPS codes to postal abbreviations
 - `IDModel.supports_sample_forecasts` (`True` for `SARIXModel`): `IDModel.run()` raises `NotImplementedError` before loading any data when `num_sample_forecasts > 0` for a model that doesn't support samples, such as `GBQRModel`
 - Peak models (`PeakBaselineModel`, `PeakGBQRModel`) raise `NotImplementedError` when `num_sample_forecasts > 0`, since peak targets have no forecast horizons to form trajectories over
 - `RunConfig.drop_incomplete_locations` (default `False`): drop, with a warning, locations missing a main-source value for the latest week. Dropped locations are missing from the output and recorded in `IDModel.dropped_unique_ids`

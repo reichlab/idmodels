@@ -7,8 +7,7 @@ import datetime
 
 import pandas as pd
 
-from idmodels.config import RunConfig, SampleIdScheme
-from idmodels.data import load_state_abbreviations
+from idmodels.config import RunConfig
 
 
 def validate_ref_date(ref_date):
@@ -42,21 +41,10 @@ def ref_date_seed(run_config: RunConfig) -> int:
     return int(calendar.timegm(run_config.ref_date.timetuple()))
 
 
-def build_sample_output_type_ids(location: pd.Series, sample_index: pd.Series,
-                                 scheme: SampleIdScheme) -> pd.Series:
+def build_sample_output_type_ids(unique_id: pd.Series, sample_index: pd.Series) -> pd.Series:
     """
-    Label sample rows' output_type_ids from their location and 0-based sample_index:
-    - STATE_ABBREVIATION: "{abbreviation}{sample_index:02d}", e.g. "US00", "AL99"
-    - DRAW_NUMBER: "{sample_index + 1}", e.g. "1", "100"
+    Label sample rows' output_type_ids as "{unique_id}-{sample_index + 1}" from their unique_id (agg_level +
+    location) and 0-based sample_index, e.g. "nationalUS-1", "state25-100", "hsa25-3". Using the unique_id rather than
+    the location keeps labels unique across agg_levels that share a location code.
     """
-    if scheme == SampleIdScheme.STATE_ABBREVIATION:
-        abbreviations = load_state_abbreviations()
-        missing = set(location) - set(abbreviations)
-        if missing:
-            raise KeyError(f"No state abbreviation for location(s) {sorted(missing)}; "
-                           f"sample_id_scheme={scheme.value} only supports states and national.")
-        return location.map(abbreviations) + sample_index.map("{:02d}".format)
-    elif scheme == SampleIdScheme.DRAW_NUMBER:
-        return (sample_index + 1).astype(str)
-    else:
-        raise ValueError(f"Unsupported sample_id_scheme: {scheme}")
+    return unique_id.astype(str) + "-" + (sample_index + 1).astype(str)

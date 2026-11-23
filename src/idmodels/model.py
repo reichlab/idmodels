@@ -102,7 +102,7 @@ class IDModel(ABC):
             output_type ("quantile" or "sample"), output_type_id, value (in inc_trans_cs space)
         Quantile rows' output_type_id is the quantile label. Sample rows instead carry an integer
         sample_index (0-based draw number, consistent across locations) and are labeled later, by
-        _format_output, according to run_config.sample_id_scheme.
+        _format_output as "{unique_id}-{sample_index + 1}", e.g. "state25-1".
         """
         ...
 
@@ -255,7 +255,7 @@ class IDModel(ABC):
             req_cols = ["agg_level"] + req_cols
 
         # quantile rows first, then sample rows. Samples sort by their numeric index rather than their
-        # label, since DRAW_NUMBER labels aren't zero-padded ("10" sorts before "2" as a string)
+        # label, since labels aren't zero-padded ("nationalUS-10" sorts before "nationalUS-2")
         sort_cols = ["horizon", "location", "agg_level"]
         ascending = [True, True, False]
         # either block may be empty: a run can be quantiles only or samples only (and samples-only rows have no
@@ -269,9 +269,9 @@ class IDModel(ABC):
         if is_sample.any():
             samples_df = preds_df.loc[is_sample].copy()
             samples_df["sample_index"] = samples_df["sample_index"].astype(int)
-            samples_df["output_type_id"] = build_sample_output_type_ids(samples_df["location"],
-                                                                        samples_df["sample_index"],
-                                                                        run_config.sample_id_scheme)
+            # same unique_id as in run(), rebuilt here since not every model keeps that column
+            samples_df["output_type_id"] = build_sample_output_type_ids(samples_df["agg_level"] + samples_df["location"],
+                                                                        samples_df["sample_index"])
             blocks.append(samples_df.sort_values(["sample_index"] + sort_cols, ascending=[True] + ascending))
 
         return pd.concat(blocks).reset_index(drop=True)[req_cols]

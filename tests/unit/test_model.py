@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from iddata.enums import Disease
 
-from idmodels.config import RunConfig, SampleIdScheme, SourceType
+from idmodels.config import RunConfig, SourceType
 from idmodels.model import IDModel
 
 
@@ -58,8 +58,8 @@ def test_run_validates_run_config_changed_after_construction():
     run_config = RunConfig(disease=Disease.FLU, ref_date=datetime.date(2024, 1, 6), output_root=Path("model-output"),
                            artifact_store_root=None, max_horizon=3, states=["US"], hsas=[], q_levels=[0.5],
                            q_labels=["0.5"], num_sample_forecasts=5)
-    run_config.num_sample_forecasts = 101  # over the STATE_ABBREVIATION limit, bypassing __post_init__
-    with pytest.raises(ValueError, match="at most 100"):
+    run_config.num_sample_forecasts = -1  # invalid, bypassing __post_init__
+    with pytest.raises(ValueError, match="must be at least 0"):
         _FakeSampleModel(model_config=Mock()).run(run_config)
 
 
@@ -120,35 +120,33 @@ def _mixed_preds_df(locations, agg_levels, num_samples):
     return preds_df
 
 
-def test_format_output_labels_state_abbreviation_samples_after_quantiles():
+def test_format_output_labels_samples_after_quantiles():
     model = _FakeModel(model_config=Mock(main_source=SourceType.NHSN))
-    run_config = Mock(disease=Disease.FLU, ref_date=datetime.date(2024, 1, 6),
-                      sample_id_scheme=SampleIdScheme.STATE_ABBREVIATION)
+    run_config = Mock(disease=Disease.FLU, ref_date=datetime.date(2024, 1, 6))
     preds_df = _mixed_preds_df(locations=["US", "01"], agg_levels=["national", "state"], num_samples=2)
 
     out = model._format_output(preds_df, run_config)
 
     assert out["output_type"].tolist() == ["quantile"] * 4 + ["sample"] * 4
-    assert out["output_type_id"].tolist() == ["0.5", "0.5", "0.975", "0.975", "AL00", "US00", "AL01", "US01"]
+    assert out["output_type_id"].tolist() == ["0.5", "0.5", "0.975", "0.975", "state01-1", "nationalUS-1",
+                                             "state01-2", "nationalUS-2"]
     assert "sample_index" not in out.columns
 
 
-def test_format_output_sorts_draw_number_samples_numerically():
-    """DRAW_NUMBER labels aren't zero-padded, so sorting by label would put "10" before "2"."""
+def test_format_output_sorts_samples_numerically():
+    """Sample labels aren't zero-padded, so sorting by label would put "nationalUS-10" before "nationalUS-2"."""
     model = _FakeModel(model_config=Mock(main_source=SourceType.NHSN))
-    run_config = Mock(disease=Disease.FLU, ref_date=datetime.date(2024, 1, 6),
-                      sample_id_scheme=SampleIdScheme.DRAW_NUMBER)
+    run_config = Mock(disease=Disease.FLU, ref_date=datetime.date(2024, 1, 6))
     preds_df = _mixed_preds_df(locations=["US"], agg_levels=["national"], num_samples=12)
 
     out = model._format_output(preds_df, run_config)
 
-    assert out.loc[out["output_type"] == "sample", "output_type_id"].tolist() == [str(i) for i in range(1, 13)]
+    assert out.loc[out["output_type"] == "sample", "output_type_id"].tolist() == [f"nationalUS-{i}" for i in range(1, 13)]
 
 
 def test_format_output_without_samples_keeps_quantile_order():
     model = _FakeModel(model_config=Mock(main_source=SourceType.NHSN))
-    run_config = Mock(disease=Disease.FLU, ref_date=datetime.date(2024, 1, 6),
-                      sample_id_scheme=SampleIdScheme.STATE_ABBREVIATION)
+    run_config = Mock(disease=Disease.FLU, ref_date=datetime.date(2024, 1, 6))
     preds_df = _mixed_preds_df(locations=["US", "01"], agg_levels=["national", "state"], num_samples=0)
     preds_df = preds_df.drop(columns="sample_index")  # GBQR never produces a sample_index column
 

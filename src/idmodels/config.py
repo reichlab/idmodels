@@ -10,8 +10,6 @@ from iddata.enums import (
     SourceType,  # re-exported for callers: from idmodels.config import SourceType
 )
 
-from idmodels.data import load_state_abbreviations
-
 SMH_UNUSED_WHEN_FITTING_SEPARATELY = (
     "SMH is a source but fit_locations_separately=True: SMH data will not be used for fitting, since "
     "per-location fits only train on each real location's own rows and never include SMH's synthetic "
@@ -27,16 +25,6 @@ class PowerTransform(str, Enum):
 class PoolingStrategy(str, Enum):
     NONE = "none"
     SHARED = "shared"
-
-
-class SampleIdScheme(str, Enum):
-    """How sample output_type_ids are labeled; each sample is one draw for one location."""
-
-    # "{state abbreviation}{2-digit 0-based index}", e.g. "US00", "AL99". States/national only, at most 100 samples
-    STATE_ABBREVIATION = "state_abbreviation"
-    # "{1-based index}" with no padding, e.g. "1", "100", for any location. Not unique across locations on its own:
-    # a downstream step is expected to prepend a per-location prefix
-    DRAW_NUMBER = "draw_number"
 
 
 @dataclass
@@ -69,9 +57,10 @@ class RunConfig:
     hsas: list[str]
     q_levels: list[float]
     q_labels: list[str]
-    # number of sample trajectories to output per location, in addition to quantiles; 0 disables sample output
+    # number of sample trajectories to output per location, in addition to quantiles; 0 disables sample output.
+    # Samples are labeled "{unique_id}-{n}" (unique_id = agg_level + location, e.g. "state25-1"), with n running from
+    # 1 to num_sample_forecasts
     num_sample_forecasts: int = 0
-    sample_id_scheme: SampleIdScheme = SampleIdScheme.STATE_ABBREVIATION
     # drop (with a warning) locations missing a main-source value for the latest week; their unique_ids are recorded
     # in the model's dropped_unique_ids. The output will then be missing those locations, which matters for hubs
     # that require a full location set. Mainly needed for SARIX, which can't fit a trailing NaN (GBQR can predict
@@ -94,7 +83,7 @@ class RunConfig:
     def validate(self):
         """
         Raise if the quantile or sample output settings are invalid. Runs when the config is created and again when a
-        model runs, since fields (e.g. num_sample_forecasts, states, hsas) can be changed after construction.
+        model runs, since fields (e.g. num_sample_forecasts) can be changed after construction.
         """
         if len(self.q_levels) != len(self.q_labels):
             raise ValueError(f"q_levels and q_labels must have the same length, got {len(self.q_levels)} and "
@@ -104,20 +93,6 @@ class RunConfig:
             raise ValueError("RunConfig requests no output: set q_levels/q_labels, num_sample_forecasts, or both.")
         if self.num_sample_forecasts < 0:
             raise ValueError(f"num_sample_forecasts must be at least 0, got {self.num_sample_forecasts}.")
-        if self.num_sample_forecasts > 0 and self.sample_id_scheme == SampleIdScheme.STATE_ABBREVIATION:
-            # the 2-digit suffix only supports indices 00-99
-            if self.num_sample_forecasts > 100:
-                raise ValueError(f"num_sample_forecasts must be at most 100 with sample_id_scheme="
-                                 f"{self.sample_id_scheme.value}, got {self.num_sample_forecasts}.")
-            if self.hsas:
-                raise ValueError(f"sample_id_scheme={self.sample_id_scheme.value} only supports states and national; "
-                                 f"use {SampleIdScheme.DRAW_NUMBER.value} to output samples for HSAs.")
-            # checked here rather than when labeling, which only happens after the model has been fit
-            unmapped = sorted(set(self.states) - set(load_state_abbreviations()))
-            if unmapped:
-                raise ValueError(f"No state abbreviation for state(s) {unmapped}, which sample_id_scheme="
-                                 f"{self.sample_id_scheme.value} needs; add them to idmodels/data/"
-                                 f"state_abbreviations.csv or use {SampleIdScheme.DRAW_NUMBER.value}.")
         # a float (e.g. 1.5) would give a non-Saturday expected week; bool is excluded since it subclasses int
         lag = self.max_data_lag_weeks
         if lag is not None and (not isinstance(lag, int) or isinstance(lag, bool) or lag < 0):
