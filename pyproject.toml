@@ -17,7 +17,7 @@ dependencies = [
     "numpy",
     "pandas~=2.0",  # pandas 3.0 breaks compatibility; remove cap once validated
     "s3fs",
-    "sarix @ git+https://github.com/reichlab/sarix@f17c8211140140ac344a432551059217ad7cead2",
+    "sarix @ git+https://github.com/reichlab/sarix@3d097d5f757d41b32655824f73129a235f0324af",
     "scikit-learn",
     "tqdm",
     "timeseriesutils @ git+https://github.com/reichlab/timeseriesutils"

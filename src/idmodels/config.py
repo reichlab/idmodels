@@ -1,4 +1,5 @@
 import datetime
+import math
 import warnings
 from abc import ABC
 from dataclasses import dataclass, field
@@ -25,9 +26,13 @@ class PowerTransform(str, Enum):
 
 
 class PoolingStrategy(str, Enum):
-    NONE = "none"  # passed to sarix as "unshared" for calendar_pooling and innovation_df_pooling
+    NONE = "none"  # passed to sarix as "unshared" for calendar_pooling, innovation_df_pooling and sigma_level_pooling
     SHARED = "shared"
-    PARTIAL = "partial"  # currently only for SARIX calendar_pooling and innovation_df_pooling
+    PARTIAL = "partial"  # currently only for SARIX calendar_pooling, innovation_df_pooling and sigma_level_pooling
+
+
+def _positive_finite(value: float) -> bool:
+    return math.isfinite(value) and value > 0
 
 
 @dataclass
@@ -93,6 +98,18 @@ class SARIXModelConfig(ModelConfig):
     innovation_df_pooling: PoolingStrategy | None = None
     innovation_df_prior_scale: float = 10.0
     innovation_df_sd_prior_scale: float = 1.0
+    # level-dependent innovation sd (formulas and priors in sarix's SARIX docs). With sigma_level, the innovation sd of
+    # each modeled variable (inc_trans_cs and any x covariates) at week t is sigma * softplus(a + b * z) / softplus(a).
+    # z is the variable's value at week t - 1 (with calendar effects divided out, if any) minus its mean over the fit
+    # window for that location, b is a fitted coefficient and a is a fitted offset, one per variable and shared
+    # across locations. sigma_level_pooling is required with sigma_level and pools only b across locations. Needs
+    # d = D = 0 and p > 0 or P > 0.
+    # sigma_level_prior_scale None uses SARIX's default: 1 / sd of z across locations and weeks
+    sigma_level: bool = False
+    sigma_level_pooling: PoolingStrategy | None = None
+    sigma_level_prior_scale: float | None = None
+    sigma_level_sd_prior_scale: float = 1.0
+    sigma_level_offset_prior_scale: float = 2.0
 
     def __post_init__(self):
         super().__post_init__()
@@ -102,6 +119,24 @@ class SARIXModelConfig(ModelConfig):
             raise ValueError("innovation_df_pooling must be specified when innovation_dist is 't'")
         if self.innovation_dist == "normal" and self.innovation_df_pooling is not None:
             raise ValueError("innovation_df_pooling should not be specified when innovation_dist is 'normal'")
+        if self.sigma_level and self.sigma_level_pooling is None:
+            raise ValueError("sigma_level_pooling must be specified when sigma_level is True")
+        if not self.sigma_level and self.sigma_level_pooling is not None:
+            raise ValueError("sigma_level_pooling should not be specified when sigma_level is False")
+        if self.sigma_level:
+            if self.d != 0 or self.D != 0:
+                raise ValueError(f"sigma_level requires d = 0 and D = 0, got d = {self.d} and D = {self.D}")
+            if self.p == 0 and self.P == 0:
+                raise ValueError("sigma_level requires at least one autoregressive lag (p > 0 or P > 0)")
+            if self.sigma_level_prior_scale is not None and not _positive_finite(self.sigma_level_prior_scale):
+                raise ValueError(f"sigma_level_prior_scale must be positive and finite or None, "
+                                 f"got {self.sigma_level_prior_scale}")
+            names = ["sigma_level_offset_prior_scale"]
+            if self.sigma_level_pooling == PoolingStrategy.PARTIAL:
+                names.append("sigma_level_sd_prior_scale")
+            for name in names:
+                if not _positive_finite(getattr(self, name)):
+                    raise ValueError(f"{name} must be positive and finite, got {getattr(self, name)}")
         if self.calendar_holidays:
             if len(set(self.calendar_holidays)) != len(self.calendar_holidays):
                 raise ValueError(f"calendar_holidays must be distinct, got {self.calendar_holidays}")

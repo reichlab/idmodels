@@ -620,7 +620,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "s3fs" },
-    { name = "sarix", git = "https://github.com/reichlab/sarix?rev=f17c8211140140ac344a432551059217ad7cead2" },
+    { name = "sarix", git = "https://github.com/reichlab/sarix?rev=3d097d5f757d41b32655824f73129a235f0324af" },
     { name = "scikit-learn" },
     { name = "timeseriesutils", git = "https://github.com/reichlab/timeseriesutils" },
     { name = "tqdm" },
@@ -1684,7 +1684,7 @@ wheels = [
 [[package]]
 name = "sarix"
 version = "0.2.0"
-source = { git = "https://github.com/reichlab/sarix?rev=f17c8211140140ac344a432551059217ad7cead2#f17c8211140140ac344a432551059217ad7cead2" }
+source = { git = "https://github.com/reichlab/sarix?rev=3d097d5f757d41b32655824f73129a235f0324af#3d097d5f757d41b32655824f73129a235f0324af" }
 dependencies = [
     { name = "jax" },
     { name = "matplotlib" },

@@ -19,7 +19,7 @@ from idmodels.sarix import SARIXFourierModel, SARIXModel
 
 def _config(config_class=SARIXModelConfig, **kwargs):
     return config_class(model_name="test", main_source=SourceType.NHSN, fit_locations_separately=False,
-                        power_transform=PowerTransform.FOURTH_ROOT, p=1, **kwargs)
+                        power_transform=PowerTransform.FOURTH_ROOT, **{"p": 1, **kwargs})
 
 
 def _run_config():
@@ -87,3 +87,73 @@ def test_fit_and_predict_normal_passes_no_innovation_params():
     with patch("idmodels.sarix.sarix.SARIX", side_effect=_fake_sarix) as m:
         SARIXModel(_config())._fit_and_predict(_df(), ["inc_trans_cs"], _run_config())
     assert not any(k.startswith("innovation") for k in m.call_args.kwargs)
+
+
+def test_sigma_level_config_validation():
+    with pytest.raises(ValueError, match="sigma_level_pooling must be specified"):
+        _config(sigma_level=True)
+    with pytest.raises(ValueError, match="should not be specified"):
+        _config(sigma_level_pooling=PoolingStrategy.SHARED)
+
+
+@pytest.mark.parametrize("kwargs, match", [
+    ({"d": 1}, "requires d = 0 and D = 0"),
+    ({"D": 1}, "requires d = 0 and D = 0"),
+    ({"p": 0}, "at least one autoregressive lag"),
+    ({"sigma_level_prior_scale": 0.0}, "sigma_level_prior_scale must be positive"),
+    ({"sigma_level_prior_scale": float("nan")}, "sigma_level_prior_scale must be positive"),
+    ({"sigma_level_offset_prior_scale": 0.0}, "sigma_level_offset_prior_scale must be positive"),
+    ({"sigma_level_offset_prior_scale": float("inf")}, "sigma_level_offset_prior_scale must be positive"),
+    ({"sigma_level_pooling": PoolingStrategy.PARTIAL, "sigma_level_sd_prior_scale": -1.0},
+     "sigma_level_sd_prior_scale must be positive"),
+])
+def test_sigma_level_config_rejects_what_sarix_rejects(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        _config(**{"sigma_level": True, "sigma_level_pooling": PoolingStrategy.SHARED, **kwargs})
+
+
+def test_sigma_level_sd_prior_scale_checked_only_with_partial_pooling():
+    _config(sigma_level=True, sigma_level_pooling=PoolingStrategy.SHARED, sigma_level_sd_prior_scale=0.0)
+
+
+def test_sigma_level_config_accepts_seasonal_lag_only():
+    _config(sigma_level=True, sigma_level_pooling=PoolingStrategy.SHARED, p=0, P=1)
+
+
+@pytest.mark.parametrize("pooling, expected", [
+    (PoolingStrategy.NONE, "unshared"),
+    (PoolingStrategy.SHARED, "shared"),
+    (PoolingStrategy.PARTIAL, "partial"),
+])
+def test_extra_sarix_params_sigma_level(pooling, expected):
+    model = SARIXModel(_config(sigma_level=True, sigma_level_pooling=pooling, sigma_level_prior_scale=2.0,
+                               sigma_level_sd_prior_scale=0.5, sigma_level_offset_prior_scale=3.0))
+    assert model._get_extra_sarix_params(_df(), _run_config()) == {
+        "sigma_level": True, "sigma_level_pooling": expected, "sigma_level_prior_scale": 2.0,
+        "sigma_level_sd_prior_scale": 0.5, "sigma_level_offset_prior_scale": 3.0}
+
+
+def test_fit_and_predict_passes_sigma_level_with_t_calendar_and_fourier_params():
+    """The Fourier model passes the level-dependent sd, innovation, calendar and Fourier parameters together."""
+    cfg = _config(SARIXFourierModelConfig, fourier_K=2, fourier_pooling=PoolingStrategy.SHARED,
+                  calendar_holidays=["christmas"], calendar_pooling=PoolingStrategy.SHARED,
+                  innovation_dist="t", innovation_df_pooling=PoolingStrategy.SHARED,
+                  sigma_level=True, sigma_level_pooling=PoolingStrategy.SHARED)
+    with patch("idmodels.sarix.sarix.SARIX", side_effect=_fake_sarix) as m:
+        SARIXFourierModel(cfg)._fit_and_predict(_df(), ["inc_trans_cs"], _run_config())
+    kw = m.call_args.kwargs
+    assert kw["sigma_level"] is True
+    assert kw["sigma_level_pooling"] == "shared"
+    assert kw["sigma_level_prior_scale"] is None  # SARIX's data-based default
+    assert kw["sigma_level_sd_prior_scale"] == 1.0
+    assert kw["sigma_level_offset_prior_scale"] == 2.0
+    assert "sigma_level_link" not in kw
+    assert kw["innovation_dist"] == "t"
+    assert kw["calendar_pooling"] == "shared" and kw["calendar_labels"].shape == (11, 1)
+    assert kw["fourier_K"] == 2
+
+
+def test_fit_and_predict_default_passes_no_sigma_level_params():
+    with patch("idmodels.sarix.sarix.SARIX", side_effect=_fake_sarix) as m:
+        SARIXModel(_config())._fit_and_predict(_df(), ["inc_trans_cs"], _run_config())
+    assert not any(k.startswith("sigma_level") for k in m.call_args.kwargs)
