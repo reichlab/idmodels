@@ -10,6 +10,8 @@ from iddata.enums import (
     SourceType,  # re-exported for callers: from idmodels.config import SourceType
 )
 
+from idmodels.calendar import canonical_holiday_spec
+
 SMH_UNUSED_WHEN_FITTING_SEPARATELY = (
     "SMH is a source but fit_locations_separately=True: SMH data will not be used for fitting, since "
     "per-location fits only train on each real location's own rows and never include SMH's synthetic "
@@ -23,8 +25,9 @@ class PowerTransform(str, Enum):
 
 
 class PoolingStrategy(str, Enum):
-    NONE = "none"
+    NONE = "none"  # passed to sarix as "unshared" for calendar_pooling
     SHARED = "shared"
+    PARTIAL = "partial"  # currently only for SARIX calendar effects (calendar_pooling)
 
 
 @dataclass
@@ -88,6 +91,29 @@ class SARIXModelConfig(ModelConfig):
     num_warmup: int = 2000
     num_samples: int = 2000
     num_chains: int = 1
+    # calendar (holiday) effects: holiday specs such as ["thanksgiving", "christmas", "new_year", "new_year+1"]
+    # (see idmodels.calendar), each getting its own multiplicative effect on the target. Empty means no calendar
+    # effects. calendar_pooling is required when calendar_holidays is non-empty
+    calendar_holidays: list[str] = field(default_factory=list)
+    calendar_pooling: PoolingStrategy | None = None
+    calendar_effect_sd_prior_scale: float = 1.0
+    calendar_effect_mu_prior_scale: float = 1.0
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.calendar_holidays:
+            if len(set(self.calendar_holidays)) != len(self.calendar_holidays):
+                raise ValueError(f"calendar_holidays must be distinct, got {self.calendar_holidays}")
+            # e.g. "new_year" and "christmas+1": always the same week, which calendar_labels would reject after
+            # the data load
+            canonical = [canonical_holiday_spec(spec) for spec in self.calendar_holidays]
+            if len(set(canonical)) != len(canonical):
+                raise ValueError(f"calendar_holidays has specs that always fall in the same week (new_year is "
+                                 f"christmas+1), got {self.calendar_holidays}")
+            if self.calendar_pooling is None:
+                raise ValueError("calendar_pooling must be specified when calendar_holidays is non-empty")
+        elif self.calendar_pooling is not None:
+            raise ValueError("calendar_pooling should not be specified when calendar_holidays is empty")
 
 
 @dataclass

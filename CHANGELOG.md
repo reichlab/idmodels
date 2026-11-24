@@ -8,11 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- SARIX calendar (holiday) effects: `SARIXModelConfig.calendar_holidays` (holiday specs such as `christmas`, `new_year`, `thanksgiving`, optionally shifted by whole weeks, e.g. `christmas-1`; default empty = off; specs that always fall in the same week, such as `new_year` and `christmas+1`, are rejected), `calendar_pooling` (required when `calendar_holidays` is non-empty; `PoolingStrategy.NONE` is passed to SARIX as `"unshared"`), `calendar_effect_sd_prior_scale` and `calendar_effect_mu_prior_scale`. The effects are estimated inside SARIX and are multiplicative on the original scale; idmodels passes the week labels and the scale of `inc_trans_cs` (`input_power` 1/4 with the fourth-root transform, else 1; `input_center` = `inc_trans_center_factor`). Requires a SARIX version with calendar effects
+- `idmodels.calendar.calendar_labels()`: integer holiday labels for Saturday week-ending dates
+- `PoolingStrategy.PARTIAL` (currently only for `calendar_pooling`)
+- `SARIXModel.sarix_fit`, `fit_unique_ids` and `fit_wk_end_dates`: the last run's SARIX fit, for inspection
 - `RunConfig.drop_incomplete_locations` (default `False`): drop, with a warning, locations missing a main-source value for the latest week. Dropped locations are missing from the output and recorded in `IDModel.dropped_unique_ids`
 - `RunConfig.max_data_lag_weeks` (default `1`): `run()` raises an error if the latest main-source week with a non-NaN value is older than `ref_date` minus this many weeks, instead of silently forecasting from stale data with every horizon shifted by a week. `None` turns the check off. When set, `drop_incomplete_locations` compares each location against this expected week rather than the newest week in the data
 
 ### Changed
 - **Behavior change:** because `max_data_lag_weeks` defaults to `1`, runs whose main-source data are older than `ref_date - 1 week` now raise an error instead of producing a forecast. Callers that intentionally run with a longer lag (e.g. backtests, or a holiday-week reporting delay) need `max_data_lag_weeks=None` or a larger value
+
+### Changed
+- SARIX raises an error before fitting if locations do not all have the same weeks or their rows are not contiguous, since the reshape into SARIX's batches would misalign them
 
 ## [2.2.0] - 2026-10-19
 
