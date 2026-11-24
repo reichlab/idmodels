@@ -11,8 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RunConfig.drop_incomplete_locations` (default `False`): drop, with a warning, locations missing a main-source value for the latest week. Dropped locations are missing from the output and recorded in `IDModel.dropped_unique_ids`
 - `RunConfig.max_data_lag_weeks` (default `1`): `run()` raises an error if the latest main-source week with a non-NaN value is older than `ref_date` minus this many weeks, instead of silently forecasting from stale data with every horizon shifted by a week. `None` turns the check off. When set, `drop_incomplete_locations` compares each location against this expected week rather than the newest week in the data
 
+- SARIX models with no autoregressive terms (`p=0`, `P=0`), e.g. a Fourier-only `SARIXFourierModelConfig`
+- `SARIXModelConfig.include_intercept` (default `False`) and `intercept_pooling`, required when `include_intercept` is `True` and `None` otherwise. The intercept is on the modeled scale: a level with `d=0` and a drift with `d=1`. Without AR terms and with `d=0`, an intercept is needed for the forecasts to match the series' level
+- `PoolingStrategy.UNSHARED` (separate parameters per location) and `PoolingStrategy.PARTIAL` (only for `intercept_pooling`: per-location intercepts shrunk toward a learned mean)
+
 ### Changed
 - **Behavior change:** because `max_data_lag_weeks` defaults to `1`, runs whose main-source data are older than `ref_date - 1 week` now raise an error instead of producing a forecast. Callers that intentionally run with a longer lag (e.g. backtests, or a holiday-week reporting delay) need `max_data_lag_weeks=None` or a larger value
+- Updated `sarix` to `03b063e` (adds no-AR models, intercepts, and the `'unshared'` pooling name)
+- SARIX pooling fields now default to `PoolingStrategy.UNSHARED`. String values (e.g. `"shared"`) are converted to `PoolingStrategy`, and `PARTIAL` is rejected for anything other than `intercept_pooling`
+
+### Deprecated
+- `PoolingStrategy.NONE`, following sarix's rename of `'none'` to `'unshared'`: SARIX configs convert it to `UNSHARED` with a `FutureWarning`
 
 ## [2.2.0] - 2026-10-19
 

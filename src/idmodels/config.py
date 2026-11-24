@@ -23,8 +23,12 @@ class PowerTransform(str, Enum):
 
 
 class PoolingStrategy(str, Enum):
-    NONE = "none"
+    UNSHARED = "unshared"
     SHARED = "shared"
+    # only valid for SARIXModelConfig.intercept_pooling: separate intercepts per location, shrunk toward a learned mean
+    PARTIAL = "partial"
+    # deprecated alias for UNSHARED, following sarix's rename; SARIX configs convert it with a FutureWarning
+    NONE = "none"
 
 
 @dataclass
@@ -77,23 +81,58 @@ class RunConfig:
 
 @dataclass
 class SARIXModelConfig(ModelConfig):
+    # p=0 and P=0 gives a model with no autoregressive terms, e.g. a Fourier-only SARIXFourierModelConfig
     p: int = 0
     P: int = 0
     d: int = 0
     D: int = 0
     season_period: int = 1
-    theta_pooling: PoolingStrategy = PoolingStrategy.NONE
-    sigma_pooling: PoolingStrategy = PoolingStrategy.NONE
+    theta_pooling: PoolingStrategy = PoolingStrategy.UNSHARED
+    sigma_pooling: PoolingStrategy = PoolingStrategy.UNSHARED
     x: list = field(default_factory=list)
     num_warmup: int = 2000
     num_samples: int = 2000
     num_chains: int = 1
+    # intercept on the modeled scale (after power transform, centering/scaling, and differencing): a level with d=0
+    # and a drift with d=1. Without AR terms and with d=0, the Fourier terms average to zero over a year, so an
+    # intercept is needed to fit the series' level. intercept_pooling is required when include_intercept is True
+    # (UNSHARED, SHARED, or PARTIAL) and must be None otherwise
+    include_intercept: bool = False
+    intercept_pooling: PoolingStrategy | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        for name in self._pooling_fields():
+            value = getattr(self, name)
+            if value is None:
+                continue
+            value = PoolingStrategy(value)
+            if value is PoolingStrategy.NONE:
+                warnings.warn(f"{name}=PoolingStrategy.NONE is deprecated; use PoolingStrategy.UNSHARED.",
+                              FutureWarning, stacklevel=3)
+                value = PoolingStrategy.UNSHARED
+            if value is PoolingStrategy.PARTIAL and name != "intercept_pooling":
+                raise ValueError(f"{name} must be PoolingStrategy.UNSHARED or PoolingStrategy.SHARED, got PARTIAL; "
+                                 "PARTIAL is only supported for intercept_pooling.")
+            setattr(self, name, value)
+
+        if self.include_intercept and self.intercept_pooling is None:
+            raise ValueError("intercept_pooling must be set when include_intercept is True.")
+        if not self.include_intercept and self.intercept_pooling is not None:
+            raise ValueError("intercept_pooling must be None when include_intercept is False.")
+
+    def _pooling_fields(self) -> list[str]:
+        """Names of the pooling fields to validate, extended by subclasses."""
+        return ["theta_pooling", "sigma_pooling", "intercept_pooling"]
 
 
 @dataclass
 class SARIXFourierModelConfig(SARIXModelConfig):
     fourier_K: int = 1
-    fourier_pooling: PoolingStrategy = PoolingStrategy.NONE
+    fourier_pooling: PoolingStrategy = PoolingStrategy.UNSHARED
+
+    def _pooling_fields(self) -> list[str]:
+        return super()._pooling_fields() + ["fourier_pooling"]
 
 
 @dataclass

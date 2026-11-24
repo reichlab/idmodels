@@ -14,7 +14,7 @@ locations <- read.csv("https://raw.githubusercontent.com/cdcepi/FluSight-forecas
 forecasts <- dplyr::bind_rows(
   read.csv("tests/integration/data/UMass-gbqr_no_reporting_adj/2024-01-06-UMass-gbqr_no_reporting_adj.csv") |>
     dplyr::mutate(model_id = "UMass-gbqr"),
-  read.csv("tests/integration/data/UMass-sarix_p6_4rt_thetashared_sigmanone/2024-01-06-UMass-sarix_p6_4rt_thetashared_sigmanone.csv") |>
+  read.csv("tests/integration/data/UMass-sarix_nhsn_p6_4rt_thetashared_sigmaunshared/2024-01-06-UMass-sarix_nhsn_p6_4rt_thetashared_sigmaunshared.csv") |>
     dplyr::mutate(model_id = "UMass-sarix")
 ) |>
   dplyr::left_join(locations)
