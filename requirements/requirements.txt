@@ -122,7 +122,7 @@ s3fs==2024.10.0
     # via
     #   idmodels (pyproject.toml)
     #   iddata
-sarix @ git+https://github.com/reichlab/sarix@35eea2379a9790e0457b1aed41d13509e5d5056f
+sarix @ git+https://github.com/reichlab/sarix@03b063e811900765424e0aad29adaeec579c1f1d
     # via idmodels (pyproject.toml)
 scikit-learn==1.5.2
     # via idmodels (pyproject.toml)

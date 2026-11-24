@@ -15,7 +15,7 @@ from idmodels.config import (
     SARIXModelConfig,
     SourceType,
 )
-from idmodels.sarix import SARIXFourierModel, SARIXModel
+from idmodels.sarix import SARIXFourierModel, SARIXModel, sarix
 
 
 def test_sarix_nhsn(make_run_config):
@@ -25,7 +25,7 @@ def test_sarix_nhsn(make_run_config):
                   "37", "38", "39", "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "53", "54", "55",
                   "56", "72"]
     model_config = create_test_sarix_model_config(main_source=SourceType.NHSN, theta_pooling=PoolingStrategy.SHARED,
-                                                  sigma_pooling=PoolingStrategy.NONE, num=200)
+                                                  sigma_pooling=PoolingStrategy.UNSHARED, num=200)
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
@@ -49,7 +49,7 @@ def test_sarix_nhsn(make_run_config):
 def test_sarix_nssp(make_run_config, fips_codes, nci_ids):
     date = datetime.date.fromisoformat("2025-11-22")
     model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
-                                                  sigma_pooling=PoolingStrategy.NONE, num=200)
+                                                  sigma_pooling=PoolingStrategy.UNSHARED, num=200)
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=nci_ids)
 
     # patch the `_np_percentile()` helper function return the same values to make the tests reproducible across OSs
@@ -79,7 +79,7 @@ def test_sarix_drop_incomplete_locations(make_run_config):
     """A location missing the latest main-source week is dropped from the output, with a warning."""
     date = datetime.date.fromisoformat("2025-11-22")
     model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
-                                                  sigma_pooling=PoolingStrategy.NONE, num=100)
+                                                  sigma_pooling=PoolingStrategy.UNSHARED, num=100)
     run_config = make_run_config(ref_date=date, states=["US", "01", "25"], hsas=[])
     run_config.drop_incomplete_locations = True
 
@@ -110,7 +110,7 @@ def test_sarix_raises_if_latest_week_missing(make_run_config):
     """If the main source hasn't published the expected week, run() raises instead of forecasting from stale data."""
     date = datetime.date.fromisoformat("2025-11-22")
     model_config = create_test_sarix_model_config(main_source=SourceType.NSSP, theta_pooling=PoolingStrategy.SHARED,
-                                                  sigma_pooling=PoolingStrategy.NONE, num=100)
+                                                  sigma_pooling=PoolingStrategy.UNSHARED, num=100)
     run_config = make_run_config(ref_date=date, states=["US", "01", "25"], hsas=[])
 
     load = DiseaseDataLoader.load
@@ -131,7 +131,7 @@ def test_sarix_shared_sigma_pooling_multiple_batches(make_run_config):
     # Use multiple locations to ensure we have multiple batches
     date = datetime.date.fromisoformat("2024-01-06")
     fips_codes = ["US", "01", "02", "04", "05"]  # Multiple locs = multiple batches
-    model_config = create_test_sarix_model_config(main_source=SourceType.NHSN, theta_pooling=PoolingStrategy.NONE,
+    model_config = create_test_sarix_model_config(main_source=SourceType.NHSN, theta_pooling=PoolingStrategy.UNSHARED,
                                                   sigma_pooling=PoolingStrategy.SHARED, num=200)
     run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
 
@@ -156,10 +156,10 @@ def test_sarix_shared_sigma_pooling_multiple_batches(make_run_config):
         "All predictions should be non-negative"
 
 
-def test_sarix_fourier_none_pooling(make_run_config):
-    """Test SARIXFourierModel with fourier_pooling='none' (unpooled)."""
+def test_sarix_fourier_unshared_pooling(make_run_config):
+    """Test SARIXFourierModel with fourier_pooling=UNSHARED (unpooled)."""
     model_config = SARIXFourierModelConfig(
-        model_name="sarix_p2_fourier_K2_none",
+        model_name="sarix_p2_fourier_K2_unshared",
         main_source=SourceType.NHSN,
         fit_locations_separately=False,
         p=2,
@@ -171,7 +171,7 @@ def test_sarix_fourier_none_pooling(make_run_config):
         theta_pooling=PoolingStrategy.SHARED,
         sigma_pooling=PoolingStrategy.SHARED,
         fourier_K=2,
-        fourier_pooling=PoolingStrategy.NONE,
+        fourier_pooling=PoolingStrategy.UNSHARED,
         x=[],
         num_warmup=50,
         num_samples=50)
@@ -248,6 +248,63 @@ def test_sarix_fourier_shared_pooling(make_run_config):
         "All predictions should be non-negative"
 
 
+@pytest.mark.parametrize("d, include_intercept, intercept_pooling", [
+    (0, True, PoolingStrategy.PARTIAL),  # seasonal curve around a per-location level
+    (1, False, None),  # random walk with seasonal drift
+])
+def test_sarix_fourier_only(make_run_config, d, include_intercept, intercept_pooling):
+    """Test SARIXFourierModel with no AR terms (p=0, P=0), so the mean comes only from Fourier terms (+ intercept)."""
+    model_config = SARIXFourierModelConfig(
+        model_name=f"sarix_fourier_only_K2_d{d}",
+        main_source=SourceType.NHSN,
+        fit_locations_separately=False,
+        p=0,
+        P=0,
+        d=d,
+        D=0,
+        season_period=1,
+        power_transform=PowerTransform.FOURTH_ROOT,
+        sigma_pooling=PoolingStrategy.SHARED,
+        fourier_K=2,
+        fourier_pooling=PoolingStrategy.SHARED,
+        include_intercept=include_intercept,
+        intercept_pooling=intercept_pooling,
+        x=[],
+        num_warmup=50,
+        num_samples=50)
+
+    date = datetime.date.fromisoformat("2024-01-06")
+    fips_codes = ["US", "01", "02", "04", "05"]  # fewer locs for faster testing
+    run_config = make_run_config(ref_date=date, states=fips_codes, hsas=[])
+
+    # keep the fitted SARIX object so we can check which parameters were sampled
+    fits = []
+    real_sarix = sarix.SARIX
+
+    def _record_fit(*args, **kwargs):
+        fits.append(real_sarix(*args, **kwargs))
+        return fits[-1]
+
+    with patch("idmodels.sarix.sarix.SARIX", side_effect=_record_fit):
+        SARIXFourierModel(model_config).run(run_config)
+
+    samples = fits[0].samples
+    assert "theta" not in samples, "No AR coefficients should be sampled with p=0, P=0"
+    assert "fourier_beta" in samples
+    assert ("intercept" in samples) == include_intercept
+
+    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
+                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv")
+    assert set(actual_df["location"].unique()) == set(run_config.states), \
+        "Output should contain predictions for all input states"
+    assert set(actual_df["output_type_id"].astype(str).unique()) == set(run_config.q_labels), \
+        "Output should contain all specified quantile levels"
+    assert actual_df["value"].notna().all(), \
+        "All predictions should be non-null"
+    assert (actual_df["value"] >= 0).all(), \
+        "All predictions should be non-negative"
+
+
 def test_sarix_fourier_wrong_config_type():
     """Test that SARIXFourierModel raises TypeError when given a SARIXModelConfig instead of SARIXFourierModelConfig."""
     model_config = SARIXModelConfig(
@@ -266,8 +323,8 @@ def test_sarix_fourier_wrong_config_type():
 
 
 def test_sarix_invalid_main_source_raises(make_run_config):
-    model_config = create_test_sarix_model_config(main_source=SourceType.ILINET, theta_pooling=PoolingStrategy.NONE,
-                                                  sigma_pooling=PoolingStrategy.NONE)
+    model_config = create_test_sarix_model_config(main_source=SourceType.ILINET, theta_pooling=PoolingStrategy.UNSHARED,
+                                                  sigma_pooling=PoolingStrategy.UNSHARED)
     run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US"], hsas=[])
 
     with pytest.raises(ValueError, match="SARIXModel only supports NHSN and NSSP as main source."):
