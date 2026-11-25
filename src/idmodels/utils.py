@@ -7,8 +7,6 @@ import datetime
 
 import pandas as pd
 
-from idmodels.config import RunConfig
-
 
 def validate_ref_date(ref_date):
     if ref_date is None:
@@ -36,9 +34,9 @@ def build_save_path(root, run_config, model_config, subdir=None):
     return save_dir / f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
 
 
-def ref_date_seed(run_config: RunConfig) -> int:
+def ref_date_seed(ref_date: datetime.date) -> int:
     """Seed for random number generation, based on reference date, so reruns for a date are reproducible."""
-    return int(calendar.timegm(run_config.ref_date.timetuple()))
+    return int(calendar.timegm(ref_date.timetuple()))
 
 
 def build_sample_output_type_ids(unique_id: pd.Series, sample_index: pd.Series) -> pd.Series:

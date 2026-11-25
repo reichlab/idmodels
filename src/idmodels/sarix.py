@@ -23,6 +23,12 @@ class SARIXModel(IDModel):
         self.model_config: SARIXModelConfig = model_config
 
 
+    def _validate_run_config(self, run_config: RunConfig) -> None:
+        # raise before loading data and fitting, rather than after the (slow) MCMC fit
+        num_draws = self.model_config.num_samples * self.model_config.num_chains
+        _raise_if_too_few_draws(num_draws, run_config.num_sample_forecasts)
+
+
     def _build_sources(self, run_config: RunConfig):
         sources_map = {SourceType.NHSN: NHSNDataSource(disease=run_config.disease),
                        SourceType.NSSP: NSSPDataSource(disease=run_config.disease)}
@@ -90,7 +96,8 @@ class SARIXModel(IDModel):
                 .merge(df_data_last_obs, on="unique_id", how="left"))
 
         if run_config.num_sample_forecasts > 0:
-            draw_inds = _select_draw_indices(draws.shape[0], run_config.num_sample_forecasts, ref_date_seed(run_config))
+            draw_inds = _select_draw_indices(draws.shape[0], run_config.num_sample_forecasts,
+                                             ref_date_seed(run_config.ref_date))
             blocks.append(_draws_to_samples_df(draws, df_data_last_obs["unique_id"].values, draw_inds)
                           .assign(output_type="sample")
                           .merge(df_data_last_obs, on="unique_id", how="left"))
@@ -141,10 +148,14 @@ def _select_draw_indices(num_draws: int, num_sample_forecasts: int, seed: int) -
     Choose which posterior predictive draws to output as samples, without replacement. Chosen once
     for all locations, so sample k in every location comes from the same posterior draw.
     """
+    _raise_if_too_few_draws(num_draws, num_sample_forecasts)
+    return np.random.default_rng(seed=seed).choice(num_draws, size=num_sample_forecasts, replace=False)
+
+
+def _raise_if_too_few_draws(num_draws: int, num_sample_forecasts: int) -> None:
     if num_sample_forecasts > num_draws:
         raise ValueError(f"num_sample_forecasts ({num_sample_forecasts}) exceeds the {num_draws} available SARIX "
                          f"posterior draws (num_samples * num_chains).")
-    return np.random.default_rng(seed=seed).choice(num_draws, size=num_sample_forecasts, replace=False)
 
 
 def _draws_to_samples_df(draws: np.ndarray, unique_ids: np.ndarray, draw_inds: np.ndarray) -> pd.DataFrame:

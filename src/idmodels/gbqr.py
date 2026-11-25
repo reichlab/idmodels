@@ -76,7 +76,9 @@ class GBQRModel(IDModel):
 
         # default to the same ref_date-based seed as the rest of GBQR, so a rerun for the same date samples the
         # same trajectories
-        seed = model_config.smh_otid_seed if model_config.smh_otid_seed is not None else ref_date_seed(run_config)
+        seed = model_config.smh_otid_seed
+        if seed is None:
+            seed = ref_date_seed(run_config.ref_date)
         rng = np.random.default_rng(seed)
 
         sampled_frames = []
@@ -297,7 +299,7 @@ class GBQRModel(IDModel):
         return preds_df
 
     def _get_test_quantile_predictions(self, run_config, df_train, x_train, y_train, x_test):
-        rng = np.random.default_rng(seed=ref_date_seed(run_config))
+        rng = np.random.default_rng(seed=ref_date_seed(run_config.ref_date))
         # seeds for lgb model fits, one per combination of bag and quantile level
         lgb_seeds = rng.integers(1e8, size=(self.model_config.num_bags, len(run_config.q_levels)))
 

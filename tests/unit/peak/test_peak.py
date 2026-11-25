@@ -1,5 +1,6 @@
 import datetime
 import warnings
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -329,6 +330,17 @@ def test_sample_forecasts_are_rejected(tmp_path, make_model):
     run_config.num_sample_forecasts = 5
     with pytest.raises(NotImplementedError, match="peak models do not support sample forecasts"):
         make_model().forecast(_synthetic_inputs(ref_date), run_config)
+
+
+def test_run_rejects_sample_forecasts_before_loading_data(tmp_path):
+    ref_date = datetime.date(2026, 12, 19)
+    run_config = _run_config(ref_date, tmp_path)
+    run_config.num_sample_forecasts = 5
+    model = _baseline_model()
+    with patch.object(model, "load_inputs") as load_inputs, \
+            pytest.raises(NotImplementedError, match="peak models do not support sample forecasts"):
+        model.run(run_config)
+    load_inputs.assert_not_called()
 
 
 def test_locations_without_data(tmp_path):

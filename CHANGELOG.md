@@ -10,16 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Sample-format forecasts (`output_type == "sample"`), written alongside quantile rows: `RunConfig.num_sample_forecasts` sets the number of sample trajectories per location (default `0`, no samples)
 - Sample `output_type_id`s are labeled `{unique_id}-{n}`, where `unique_id` is `agg_level` + `location` and `n` runs from 1 to `num_sample_forecasts` (e.g. `nationalUS-1`, `state25-100`, `hsa25-3`), so labels are unique across locations and agg levels
-- `SARIXModel` sample output: posterior predictive draws are subsampled without replacement (seeded by `ref_date`), using the same draws for every location
+- `SARIXModel` sample output: posterior predictive draws are subsampled without replacement (seeded by `ref_date`), using the same draws for every location. `SARIXModel.run()` raises before loading data if `num_sample_forecasts` exceeds `num_samples * num_chains`
 - Samples-only runs: `q_levels`/`q_labels` may be empty when `num_sample_forecasts > 0` (`RunConfig` rejects a run with neither, and `q_levels`/`q_labels` of different lengths)
 - `IDModel.supports_sample_forecasts` (`True` for `SARIXModel`): `IDModel.run()` raises `NotImplementedError` before loading any data when `num_sample_forecasts > 0` for a model that doesn't support samples, such as `GBQRModel`
-- Peak models (`PeakBaselineModel`, `PeakGBQRModel`) raise `NotImplementedError` when `num_sample_forecasts > 0`, since peak targets have no forecast horizons to form trajectories over
+- Peak models (`PeakBaselineModel`, `PeakGBQRModel`) raise `NotImplementedError` (in `run()`, before loading data) when `num_sample_forecasts > 0`, since peak targets have no forecast horizons to form trajectories over
 - `RunConfig.drop_incomplete_locations` (default `False`): drop, with a warning, locations missing a main-source value for the latest week. Dropped locations are missing from the output and recorded in `IDModel.dropped_unique_ids`
 - `RunConfig.max_data_lag_weeks` (default `1`): `run()` raises an error if the latest main-source week with a non-NaN value is older than `ref_date` minus this many weeks, instead of silently forecasting from stale data with every horizon shifted by a week. `None` turns the check off. When set, `drop_incomplete_locations` compares each location against this expected week rather than the newest week in the data
 
 ### Changed
 - `IDModel._fit_and_predict` implementations now set `output_type` on each row (previously hardcoded to `"quantile"` in `_format_output`); sample rows carry a 0-based `sample_index` that `_format_output` turns into `output_type_id`
-- The `ref_date`-based random seed helper moved from `gbqr.py` to `idmodels.utils.ref_date_seed`, shared by GBQR and SARIX
+- The `ref_date`-based random seed helper moved from `gbqr.py` to `idmodels.utils.ref_date_seed(ref_date)`, shared by GBQR, SARIX, and the peak models
 - **Behavior change:** because `max_data_lag_weeks` defaults to `1`, runs whose main-source data are older than `ref_date - 1 week` now raise an error instead of producing a forecast. Callers that intentionally run with a longer lag (e.g. backtests, or a holiday-week reporting delay) need `max_data_lag_weeks=None` or a larger value
 
 ## [2.2.0] - 2026-10-19

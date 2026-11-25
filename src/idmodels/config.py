@@ -59,7 +59,8 @@ class RunConfig:
     q_labels: list[str]
     # number of sample trajectories to output per location, in addition to quantiles; 0 disables sample output.
     # Samples are labeled "{unique_id}-{n}" (unique_id = agg_level + location, e.g. "state25-1"), with n running from
-    # 1 to num_sample_forecasts
+    # 1 to num_sample_forecasts. Each label is scoped to one location, so samples are marginal: a model with joint
+    # (cross-location) samples would need labels shared across locations
     num_sample_forecasts: int = 0
     # drop (with a warning) locations missing a main-source value for the latest week; their unique_ids are recorded
     # in the model's dropped_unique_ids. The output will then be missing those locations, which matters for hubs

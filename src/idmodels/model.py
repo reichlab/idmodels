@@ -45,6 +45,7 @@ class IDModel(ABC):
         if run_config.num_sample_forecasts > 0 and not self.supports_sample_forecasts:
             raise NotImplementedError(f"{type(self).__name__} does not support sample forecasts yet; "
                                       f"set num_sample_forecasts=0.")
+        self._validate_run_config(run_config)
 
         self.dropped_unique_ids = []
         sources = self._build_sources(run_config)
@@ -76,6 +77,14 @@ class IDModel(ABC):
         # Ensure output_type_id is string to avoid pandas inferring it as float when reading
         preds_df["output_type_id"] = preds_df["output_type_id"].astype(str)
         preds_df.to_csv(save_path, index=False)
+
+
+    def _validate_run_config(self, run_config: RunConfig) -> None:
+        """
+        Hook for model-specific checks of run_config against model_config, run before any data is loaded. Does nothing
+        by default.
+        """
+        pass
 
 
     @abstractmethod

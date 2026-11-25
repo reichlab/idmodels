@@ -285,12 +285,11 @@ def test_sarix_samples_with_quantiles(make_run_config):
     # labels are read as strings so quantile labels compare as written, despite sample labels sharing the column.
     # value stays numeric so assert_frame_equal compares it with a tolerance: an exact text comparison fails on
     # last-digit floating point differences across platforms
-    dtype = {"location": str, "output_type_id": str}
-    actual_df = pd.read_csv(run_config.output_root / f"UMass-{model_config.model_name}" /
-                            f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv", dtype=dtype)
+    actual_df = _read_output(run_config, model_config)
     expected_df = pd.read_csv(Path("tests") / "integration" / "data" /
                               f"UMass-{model_config.model_name}" /
-                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-state.csv", dtype=dtype)
+                              f"{str(run_config.ref_date)}-UMass-{model_config.model_name}-state.csv",
+                              dtype={"location": str, "output_type_id": str})
 
     # quantile rows come first and match the quantile-only output
     n_quantile_rows = len(expected_df)
@@ -337,8 +336,11 @@ def test_sarix_samples_exceeding_posterior_draws_raises(make_run_config):
     run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US", "01"], hsas=[],
                                  num_sample_forecasts=21)
 
-    with pytest.raises(ValueError, match="exceeds the 20 available SARIX posterior draws"):
+    # raised before loading data and fitting
+    with patch("idmodels.model.DiseaseDataLoader") as loader, \
+            pytest.raises(ValueError, match="exceeds the 20 available SARIX posterior draws"):
         SARIXModel(model_config).run(run_config)
+    loader.assert_not_called()
     assert not (run_config.output_root / f"UMass-{model_config.model_name}" /
                 f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv").exists()
 
