@@ -43,7 +43,10 @@ class ModelConfig(ABC):
 
 @dataclass
 class RunConfig:
-    """Run configuration: disease, locations, output paths, quantile levels."""
+    """
+    Run configuration: disease, locations, output paths, quantile levels, sample output. q_levels/q_labels may be
+    empty for a samples-only run (models that support samples only).
+    """
 
     disease: Disease
     ref_date: datetime.date
@@ -54,6 +57,11 @@ class RunConfig:
     hsas: list[str]
     q_levels: list[float]
     q_labels: list[str]
+    # number of sample trajectories to output per location, in addition to quantiles; 0 disables sample output.
+    # Samples are labeled "{unique_id}-{n}" (unique_id = agg_level + location, e.g. "state25-1"), with n running from
+    # 1 to num_sample_forecasts. Each label is scoped to one location, so samples are marginal: a model with joint
+    # (cross-location) samples would need labels shared across locations
+    num_sample_forecasts: int = 0
     # drop (with a warning) locations missing a main-source value for the latest week; their unique_ids are recorded
     # in the model's dropped_unique_ids. The output will then be missing those locations, which matters for hubs
     # that require a full location set. Mainly needed for SARIX, which can't fit a trailing NaN (GBQR can predict
@@ -68,7 +76,24 @@ class RunConfig:
     # this expected week rather than the newest week in the data
     max_data_lag_weeks: int | None = 1
 
+
     def __post_init__(self):
+        self.validate()
+
+
+    def validate(self):
+        """
+        Raise if the quantile or sample output settings are invalid. Runs when the config is created and again when a
+        model runs, since fields (e.g. num_sample_forecasts) can be changed after construction.
+        """
+        if len(self.q_levels) != len(self.q_labels):
+            raise ValueError(f"q_levels and q_labels must have the same length, got {len(self.q_levels)} and "
+                             f"{len(self.q_labels)}.")
+        # q_levels may be empty for a samples-only run, but a run must output something
+        if not self.q_levels and self.num_sample_forecasts == 0:
+            raise ValueError("RunConfig requests no output: set q_levels/q_labels, num_sample_forecasts, or both.")
+        if self.num_sample_forecasts < 0:
+            raise ValueError(f"num_sample_forecasts must be at least 0, got {self.num_sample_forecasts}.")
         # a float (e.g. 1.5) would give a non-Saturday expected week; bool is excluded since it subclasses int
         lag = self.max_data_lag_weeks
         if lag is not None and (not isinstance(lag, int) or isinstance(lag, bool) or lag < 0):

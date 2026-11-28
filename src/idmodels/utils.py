@@ -2,7 +2,10 @@
 # with updated model_name choices
 # In a future refactor, we should consolidate
 
+import calendar
 import datetime
+
+import pandas as pd
 
 
 def validate_ref_date(ref_date):
@@ -29,3 +32,17 @@ def build_save_path(root, run_config, model_config, subdir=None):
         save_dir = save_dir / subdir
     save_dir.mkdir(parents=True, exist_ok=True)
     return save_dir / f"{str(run_config.ref_date)}-UMass-{model_config.model_name}.csv"
+
+
+def ref_date_seed(ref_date: datetime.date) -> int:
+    """Seed for random number generation, based on reference date, so reruns for a date are reproducible."""
+    return int(calendar.timegm(ref_date.timetuple()))
+
+
+def build_sample_output_type_ids(unique_id: pd.Series, sample_index: pd.Series) -> pd.Series:
+    """
+    Label sample rows' output_type_ids as "{unique_id}-{sample_index + 1}" from their unique_id (agg_level +
+    location) and 0-based sample_index, e.g. "nationalUS-1", "state25-100", "hsa25-3". Using the unique_id rather than
+    the location keeps labels unique across agg_levels that share a location code.
+    """
+    return unique_id.astype(str) + "-" + (sample_index + 1).astype(str)

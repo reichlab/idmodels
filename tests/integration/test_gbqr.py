@@ -603,6 +603,18 @@ def test_gbqr_invalid_main_source_raises(make_run_config):
         GBQRModel(model_config)._build_sources(run_config)
 
 
+def test_gbqr_sample_forecasts_raise_not_implemented(make_run_config):
+    """Requesting samples must fail before loading data rather than silently write a quantile-only file."""
+    model_config = create_test_gbqr_model_config(main_source=SourceType.NHSN)
+    run_config = make_run_config(ref_date=datetime.date.fromisoformat("2024-01-06"), states=["US"], hsas=[],
+                                 num_sample_forecasts=5)
+
+    with patch("idmodels.model.DiseaseDataLoader") as loader, \
+            pytest.raises(NotImplementedError, match="GBQRModel does not support sample forecasts"):
+        GBQRModel(model_config).run(run_config)
+    loader.assert_not_called()
+
+
 def test_gbqr_build_sources_dedupes_main_source_in_supplementary_sources(make_run_config):
     model_config = create_test_gbqr_model_config(
         main_source=SourceType.NHSN,

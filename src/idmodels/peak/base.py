@@ -16,7 +16,6 @@ features, predict each horizon) does not fit targets that are a single value per
 from historical seasons replayed week by week (idmodels.peak.series.build_replay_rows).
 """
 
-import calendar
 import datetime
 import warnings
 from abc import ABC, abstractmethod
@@ -47,7 +46,7 @@ from idmodels.peak.series import (
     peak_week_climatology,
     state_features,
 )
-from idmodels.utils import build_save_path
+from idmodels.utils import build_save_path, ref_date_seed
 
 PEAK_WEEK_TARGET = "peak week inc {disease} hosp"
 PEAK_SIZE_TARGET = "peak inc {disease} hosp"
@@ -56,6 +55,14 @@ PEAK_SIZE_TARGET = "peak inc {disease} hosp"
 # dates does not keep every date's data in memory; only the most recently used entries are kept.
 _DATA_CACHE: OrderedDict[tuple, pd.DataFrame] = OrderedDict()
 _DATA_CACHE_SIZE = 4
+
+
+def _raise_if_samples_requested(run_config: RunConfig) -> None:
+    # sample output is trajectories of weekly incidence across forecast horizons, which peak targets (one season-level
+    # peak week and peak size per location, with no horizons) don't have; raise rather than silently write a file
+    # without the requested samples
+    if run_config.num_sample_forecasts > 0:
+        raise NotImplementedError("peak models do not support sample forecasts; set num_sample_forecasts=0.")
 
 
 @dataclass
@@ -81,8 +88,11 @@ class PeakModel(ABC):
         """
         Load data available on run_config.ref_date, forecast, and save a hub-formatted csv. Returns the forecast.
         Peak models use run_config's disease, ref_date, output_root, states (the locations to forecast), q_levels and
-        q_labels; artifact_store_root, max_horizon and hsas are ignored.
+        q_labels; artifact_store_root, max_horizon and hsas are ignored, and num_sample_forecasts must be 0.
         """
+        # raise before loading any data (as IDModel.run() does)
+        run_config.validate()
+        _raise_if_samples_requested(run_config)
         inputs = self.load_inputs(run_config.ref_date)
         preds_df = self.forecast(inputs, run_config)
         save_path = build_save_path(root=run_config.output_root, run_config=run_config, model_config=self.model_config)
@@ -118,9 +128,10 @@ class PeakModel(ABC):
         # the data loaded by load_inputs() and the revision model's vintages are influenza-only
         if run_config.disease != Disease.FLU:
             raise ValueError(f"peak models support only influenza, not {Disease(run_config.disease).value!r}")
+        _raise_if_samples_requested(run_config)
         season = season_of(run_config.ref_date)
         self.fit(inputs.data, season, run_config.q_levels)
-        rng = np.random.default_rng(int(calendar.timegm(run_config.ref_date.timetuple())))
+        rng = np.random.default_rng(ref_date_seed(run_config.ref_date))
         pmf, quantiles, locations = self._predict_current_season(inputs, season, run_config, rng)
         # fail loudly rather than return (or write) an incomplete submission
         if np.isnan(pmf).any() or np.isnan(quantiles).any():
